@@ -1,0 +1,19 @@
+# Dependencies & build output
+node_modules/
+dist/
+dist-ssr/
+.vercel/
+
+# Secrets - never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Contains the database connection string
+Prompt.txt
+
+# Logs & OS files
+*.log
+.DS_Store
