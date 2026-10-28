@@ -4,6 +4,6 @@ all  private keys are not pushed into github.
 This will be later integrated with vercel for deployment.
  
 commit all changes before pushing to github
-git remote add origin https://github.com/Alhumood/aliahmedday4.git
+git remote add origin  https://github.com/Alhumood/aliahmedday4.git
 git branch -M main
 git push -u origin main
