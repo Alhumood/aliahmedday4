@@ -15,7 +15,7 @@ export const swaggerSpec = swaggerJsdoc({
       version: "1.0.0",
       description: "CRUD REST API for the customer table, plus a Claude-powered natural-language agent endpoint.",
     },
-    servers: [{ url: `http://localhost:${process.env.PORT || 4000}` }],
+    servers: [{ url: "/", description: "Current host" }],
     components: {
       schemas: {
         Customer: {

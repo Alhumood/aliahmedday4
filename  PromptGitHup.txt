@@ -4,12 +4,9 @@ all  private keys are not pushed into github.
 This will be later integrated with vercel for deployment.
  
 commit all changes before pushing to github
-git remote add origin  echo "# aliahmedday4" >> README.md
-git init
-git add README.md
-git commit -m "first commit"
-git branch -M main
 git remote add origin https://github.com/Alhumood/aliahmedday4.git
-git push -u origin main
 git branch -M main
 git push -u origin main
+ 
+Make this project ready for Vercel deployment ,make sure swagger UI files and endpoint works
+correctly
