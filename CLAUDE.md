@@ -11,6 +11,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 There is no test suite in either project (`backend` `npm test` is the npm placeholder).
 
+## Workflow: spec-driven development
+
+Follow these steps in order for every feature or change:
+
+1. **Spec:** write the spec in `_specs/` and get the user's approval before going further.
+2. **Plan:** once the spec is approved, write the implementation plan in `_plans/`.
+3. **Implement:** before writing any code, make sure the current branch has no uncommitted changes. If it does, commit them first (or ask the user), so the implementation starts from a clean commit.
+
 ## Commands
 
 ```bash
