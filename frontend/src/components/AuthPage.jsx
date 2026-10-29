@@ -50,12 +50,12 @@ export default function AuthPage() {
         <form onSubmit={handleSubmit} className="form">
           {isRegister && (
             <label>
-              {t.name} <span className="req">*</span>
+              <span>{t.name} <span className="req">*</span></span>
               <input value={form.name} onChange={update('name')} autoComplete="name" autoFocus />
             </label>
           )}
           <label>
-            {t.email} <span className="req">*</span>
+            <span>{t.email} <span className="req">*</span></span>
             <input
               type="email"
               dir="ltr"
@@ -66,7 +66,7 @@ export default function AuthPage() {
             />
           </label>
           <label>
-            {t.password} <span className="req">*</span>
+            <span>{t.password} <span className="req">*</span></span>
             <input
               type="password"
               dir="ltr"

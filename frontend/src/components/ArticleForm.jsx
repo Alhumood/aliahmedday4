@@ -34,7 +34,7 @@ export default function ArticleForm({ initial, categories, onSubmit, onCancel })
   return (
     <form onSubmit={handleSubmit} className="form">
       <label>
-        {t.articleTitle} <span className="req">*</span>
+        <span>{t.articleTitle} <span className="req">*</span></span>
         <input dir="auto" value={form.title} onChange={update('title')} autoFocus placeholder={t.articleTitlePlaceholder} />
       </label>
       <label>
@@ -45,7 +45,7 @@ export default function ArticleForm({ initial, categories, onSubmit, onCancel })
         </datalist>
       </label>
       <label>
-        {t.content} <span className="req">*</span>
+        <span>{t.content} <span className="req">*</span></span>
         <textarea dir="auto" rows={8} value={form.content} onChange={update('content')} placeholder={t.contentPlaceholder} />
       </label>
       {error && <div className="alert error">{error}</div>}

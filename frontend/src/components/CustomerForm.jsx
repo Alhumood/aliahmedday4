@@ -33,7 +33,7 @@ export default function CustomerForm({ initial, onSubmit, onCancel }) {
   return (
     <form onSubmit={handleSubmit} className="form">
       <label>
-        {t.name} <span className="req">*</span>
+        <span>{t.name} <span className="req">*</span></span>
         <input value={form.name} onChange={update('name')} autoFocus placeholder="Jane Doe" />
       </label>
       <label>
