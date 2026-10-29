@@ -2,7 +2,13 @@ import Anthropic from "@anthropic-ai/sdk";
 import { randomUUID } from "node:crypto";
 import * as db from "./db.js";
 
-const MODEL = "claude-opus-5-5";
+const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-5-5";
+const EFFORT = process.env.AGENT_EFFORT || "low";
+// Server-side refusal fallback is only available on these models (Haiku 5.5 has none).
+const FALLBACK_MODELS = new Set(["claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"]);
+const fallbackParams = FALLBACK_MODELS.has(MODEL)
+  ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" }
+  : {};
 const MAX_TOOL_ROUNDS = 8;
 
 const ACCESS_RULES = {
@@ -158,9 +164,8 @@ export async function chat(user, message, conversationId) {
       system: systemPrompt(user),
       tools,
       messages,
-      output_config: { effort: "low" },
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
+      output_config: { effort: EFFORT },
+      ...fallbackParams,
     });
 
     messages.push({ role: "assistant", content: response.content });
