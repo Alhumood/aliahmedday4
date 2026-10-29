@@ -3,6 +3,8 @@ import express from "express";
 import cors from "cors";
 import { swaggerSpec } from "./swagger.js";
 import { pool } from "./db.js";
+import { requireAuth } from "./auth.js";
+import authRoutes from "./routes/auth.js";
 import customerRoutes from "./routes/customers.js";
 import agentRoutes from "./routes/agent.js";
 import knowledgeRoutes from "./routes/knowledge.js";
@@ -33,6 +35,7 @@ const swaggerHtml = `<!doctype html>
       dom_id: "#swagger-ui",
       presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
       layout: "StandaloneLayout",
+      persistAuthorization: true,
     });
   </script>
 </body>
@@ -45,15 +48,16 @@ app.get("/", (_req, res) => res.redirect("/swagger"));
 app.get("/api/health", async (_req, res) => {
   try {
     await pool.query("SELECT 1");
-    res.json({ status: "ok", database: "connected", agent: Boolean(process.env.ANTHROPIC_API_KEY) });
+    res.json({ status: "ok", database: "connected", agent: Boolean(process.env.ANTHROPIC_API_KEY), auth: Boolean(process.env.JWT_SECRET) });
   } catch (err) {
     res.status(503).json({ status: "error", database: err.message });
   }
 });
 
-app.use("/api/customers", customerRoutes);
-app.use("/api/knowledge", knowledgeRoutes);
-app.use("/api/agent", agentRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/customers", requireAuth, customerRoutes);
+app.use("/api/knowledge", requireAuth, knowledgeRoutes);
+app.use("/api/agent", requireAuth, agentRoutes);
 
 app.use((err, _req, res, _next) => {
   console.error(err);

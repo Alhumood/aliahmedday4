@@ -11,7 +11,8 @@ const router = Router();
  *     tags: [Agent]
  *     summary: Ask a natural-language question about customer data
  *     description: |
- *       Claude answers using tools that read and write the customer table.
+ *       Claude answers using tools that read and write the customer table,
+ *       limited to the customers assigned to the logged-in user.
  *       Try: "get all customers", "find customer Kannan",
  *       "add customer Sara with email sara@example.com".
  *       Pass the returned conversationId to continue the same conversation.
@@ -43,6 +44,7 @@ const router = Router();
  *                       name: { type: string }
  *                       input: { type: object }
  *       400: { description: message is required }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
  *       503: { description: Anthropic API key not configured }
  */
 router.post("/chat", async (req, res, next) => {
@@ -51,7 +53,7 @@ router.post("/chat", async (req, res, next) => {
     return res.status(400).json({ error: "message is required" });
   }
   try {
-    res.json(await chat(message.trim(), conversationId));
+    res.json(await chat(req.user, message.trim(), conversationId));
   } catch (err) {
     if (err instanceof Anthropic.APIError) {
       return res.status(502).json({ error: `Anthropic API error: ${err.message}` });
@@ -70,9 +72,10 @@ router.post("/chat", async (req, res, next) => {
  *       - { in: path, name: conversationId, required: true, schema: { type: string } }
  *     responses:
  *       204: { description: Conversation cleared }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
  */
 router.delete("/chat/:conversationId", (req, res) => {
-  resetConversation(req.params.conversationId);
+  resetConversation(req.user.user_id, req.params.conversationId);
   res.status(204).end();
 });
 

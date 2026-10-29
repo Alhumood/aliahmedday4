@@ -5,50 +5,119 @@ export const pool = new pg.Pool({
   ssl: { rejectUnauthorized: false },
 });
 
-const COLUMNS = "customer_id, name, email, phone, created_at";
-
-export async function listCustomers() {
-  const { rows } = await pool.query(`SELECT ${COLUMNS} FROM customer ORDER BY customer_id`);
-  return rows;
+// The user table and the customer owner column are created on first use, like the knowledge table.
+let authReady;
+function ensureAuthSchema() {
+  authReady ??= pool
+    .query(
+      `CREATE TABLE IF NOT EXISTS app_user (
+         user_id SERIAL PRIMARY KEY,
+         name TEXT NOT NULL,
+         email TEXT NOT NULL UNIQUE,
+         password_hash TEXT NOT NULL,
+         role TEXT NOT NULL DEFAULT 'sales',
+         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+       );
+       ALTER TABLE customer ADD COLUMN IF NOT EXISTS sales_user_id INTEGER REFERENCES app_user(user_id);
+       CREATE INDEX IF NOT EXISTS customer_sales_user_id_idx ON customer (sales_user_id);`,
+    )
+    .catch((err) => {
+      authReady = undefined;
+      throw err;
+    });
+  return authReady;
 }
 
-export async function getCustomerById(id) {
-  const { rows } = await pool.query(`SELECT ${COLUMNS} FROM customer WHERE customer_id = $1`, [id]);
+const USER_COLUMNS = "user_id, name, email, role, created_at";
+
+export async function createUser({ name, email, passwordHash }) {
+  await ensureAuthSchema();
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO app_user (name, email, password_hash, role) VALUES ($1, $2, $3, 'sales') RETURNING ${USER_COLUMNS}`,
+      [name, email, passwordHash],
+    );
+    return rows[0];
+  } catch (err) {
+    if (err.code === "23505") {
+      const conflict = new Error("Email is already registered");
+      conflict.status = 409;
+      throw conflict;
+    }
+    throw err;
+  }
+}
+
+// Includes password_hash; only for verifying a login.
+export async function getUserByEmail(email) {
+  await ensureAuthSchema();
+  const { rows } = await pool.query(`SELECT ${USER_COLUMNS}, password_hash FROM app_user WHERE email = $1`, [email]);
   return rows[0] ?? null;
 }
 
-export async function searchCustomersByName(name) {
+export async function getUserById(id) {
+  await ensureAuthSchema();
+  const { rows } = await pool.query(`SELECT ${USER_COLUMNS} FROM app_user WHERE user_id = $1`, [id]);
+  return rows[0] ?? null;
+}
+
+// Every customer query is scoped to the owning sales user, so other users' rows are never visible.
+const COLUMNS = "customer_id, name, email, phone, sales_user_id, created_at";
+
+export async function listCustomers(userId) {
+  await ensureAuthSchema();
   const { rows } = await pool.query(
-    `SELECT ${COLUMNS} FROM customer WHERE name ILIKE $1 ORDER BY customer_id`,
-    [`%${name}%`],
+    `SELECT ${COLUMNS} FROM customer WHERE sales_user_id = $1 ORDER BY customer_id`,
+    [userId],
   );
   return rows;
 }
 
-export async function createCustomer({ name, email = null, phone = null }) {
+export async function getCustomerById(userId, id) {
+  await ensureAuthSchema();
   const { rows } = await pool.query(
-    `INSERT INTO customer (name, email, phone) VALUES ($1, $2, $3) RETURNING ${COLUMNS}`,
-    [name, email, phone],
+    `SELECT ${COLUMNS} FROM customer WHERE customer_id = $1 AND sales_user_id = $2`,
+    [id, userId],
+  );
+  return rows[0] ?? null;
+}
+
+export async function searchCustomersByName(userId, name) {
+  await ensureAuthSchema();
+  const { rows } = await pool.query(
+    `SELECT ${COLUMNS} FROM customer WHERE name ILIKE $1 AND sales_user_id = $2 ORDER BY customer_id`,
+    [`%${name}%`, userId],
+  );
+  return rows;
+}
+
+export async function createCustomer(userId, { name, email = null, phone = null }) {
+  await ensureAuthSchema();
+  const { rows } = await pool.query(
+    `INSERT INTO customer (name, email, phone, sales_user_id) VALUES ($1, $2, $3, $4) RETURNING ${COLUMNS}`,
+    [name, email, phone, userId],
   );
   return rows[0];
 }
 
-export async function updateCustomer(id, { name, email, phone }) {
+export async function updateCustomer(userId, id, { name, email, phone }) {
+  await ensureAuthSchema();
   const { rows } = await pool.query(
     `UPDATE customer SET
-       name = COALESCE($2, name),
-       email = COALESCE($3, email),
-       phone = COALESCE($4, phone)
-     WHERE customer_id = $1 RETURNING ${COLUMNS}`,
-    [id, name ?? null, email ?? null, phone ?? null],
+       name = COALESCE($3, name),
+       email = COALESCE($4, email),
+       phone = COALESCE($5, phone)
+     WHERE customer_id = $1 AND sales_user_id = $2 RETURNING ${COLUMNS}`,
+    [id, userId, name ?? null, email ?? null, phone ?? null],
   );
   return rows[0] ?? null;
 }
 
-export async function deleteCustomer(id) {
+export async function deleteCustomer(userId, id) {
+  await ensureAuthSchema();
   const { rows } = await pool.query(
-    `DELETE FROM customer WHERE customer_id = $1 RETURNING ${COLUMNS}`,
-    [id],
+    `DELETE FROM customer WHERE customer_id = $1 AND sales_user_id = $2 RETURNING ${COLUMNS}`,
+    [id, userId],
   );
   return rows[0] ?? null;
 }

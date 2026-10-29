@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { api } from './api.js'
 import { useI18n } from './i18n.jsx'
+import { useAuth } from './auth.jsx'
+import AuthPage from './components/AuthPage.jsx'
 import CustomersPage from './components/CustomersPage.jsx'
 import ChatPage from './components/ChatPage.jsx'
 import DashboardPage from './components/DashboardPage.jsx'
@@ -14,7 +16,14 @@ const NAV = [
 ]
 
 export default function App() {
+  const { user } = useAuth()
+  // Keying on the user remounts everything on login/logout, so no page or chat state carries over.
+  return user ? <MainLayout key={user.user_id} /> : <AuthPage />
+}
+
+function MainLayout() {
   const { t, toggle } = useI18n()
+  const { user, logout } = useAuth()
   const [page, setPage] = useState('dashboard')
   const [chatPrompt, setChatPrompt] = useState(null)
   const [health, setHealth] = useState(null)
@@ -52,6 +61,14 @@ export default function App() {
             </button>
           ))}
         </nav>
+        <div className="user-block">
+          <span className="avatar">{user.name.slice(0, 2).toUpperCase()}</span>
+          <div className="user-info">
+            <span className="user-name">{user.name}</span>
+            <span className="user-role">{t.roles[user.role] ?? user.role}</span>
+          </div>
+          <button className="logout-btn" onClick={logout} title={t.logout}>{t.logout}</button>
+        </div>
         <button className="lang-toggle" onClick={toggle}>🌐 {t.language}</button>
         <div className="sidebar-footer">
           <div className="status">

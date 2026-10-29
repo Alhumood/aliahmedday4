@@ -17,7 +17,7 @@ function parseId(req, res) {
  * /api/customers:
  *   get:
  *     tags: [Customers]
- *     summary: List all customers, optionally filtered by name
+ *     summary: List your customers, optionally filtered by name
  *     parameters:
  *       - in: query
  *         name: name
@@ -31,11 +31,12 @@ function parseId(req, res) {
  *             schema:
  *               type: array
  *               items: { $ref: '#/components/schemas/Customer' }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
  */
 router.get("/", async (req, res, next) => {
   try {
     const { name } = req.query;
-    res.json(name ? await db.searchCustomersByName(String(name)) : await db.listCustomers());
+    res.json(name ? await db.searchCustomersByName(req.user.user_id, String(name)) : await db.listCustomers(req.user.user_id));
   } catch (err) {
     next(err);
   }
@@ -55,13 +56,14 @@ router.get("/", async (req, res, next) => {
  *         content:
  *           application/json:
  *             schema: { $ref: '#/components/schemas/Customer' }
- *       404: { description: Customer not found }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
+ *       404: { description: Customer not found or not assigned to you }
  */
 router.get("/:id", async (req, res, next) => {
   try {
     const id = parseId(req, res);
     if (id === null) return;
-    const customer = await db.getCustomerById(id);
+    const customer = await db.getCustomerById(req.user.user_id, id);
     if (!customer) return res.status(404).json({ error: "Customer not found" });
     res.json(customer);
   } catch (err) {
@@ -74,7 +76,7 @@ router.get("/:id", async (req, res, next) => {
  * /api/customers:
  *   post:
  *     tags: [Customers]
- *     summary: Create a customer
+ *     summary: Create a customer assigned to you
  *     requestBody:
  *       required: true
  *       content:
@@ -87,6 +89,7 @@ router.get("/:id", async (req, res, next) => {
  *           application/json:
  *             schema: { $ref: '#/components/schemas/Customer' }
  *       400: { description: Validation error }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
  */
 router.post("/", async (req, res, next) => {
   try {
@@ -94,7 +97,7 @@ router.post("/", async (req, res, next) => {
     if (typeof name !== "string" || !name.trim()) {
       return res.status(400).json({ error: "name is required" });
     }
-    res.status(201).json(await db.createCustomer({ name: name.trim(), email, phone }));
+    res.status(201).json(await db.createCustomer(req.user.user_id, { name: name.trim(), email, phone }));
   } catch (err) {
     next(err);
   }
@@ -119,7 +122,8 @@ router.post("/", async (req, res, next) => {
  *         content:
  *           application/json:
  *             schema: { $ref: '#/components/schemas/Customer' }
- *       404: { description: Customer not found }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
+ *       404: { description: Customer not found or not assigned to you }
  */
 router.put("/:id", async (req, res, next) => {
   try {
@@ -129,7 +133,7 @@ router.put("/:id", async (req, res, next) => {
     if (name !== undefined && (typeof name !== "string" || !name.trim())) {
       return res.status(400).json({ error: "name cannot be empty" });
     }
-    const customer = await db.updateCustomer(id, { name: name?.trim(), email, phone });
+    const customer = await db.updateCustomer(req.user.user_id, id, { name: name?.trim(), email, phone });
     if (!customer) return res.status(404).json({ error: "Customer not found" });
     res.json(customer);
   } catch (err) {
@@ -151,13 +155,14 @@ router.put("/:id", async (req, res, next) => {
  *         content:
  *           application/json:
  *             schema: { $ref: '#/components/schemas/Customer' }
- *       404: { description: Customer not found }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
+ *       404: { description: Customer not found or not assigned to you }
  */
 router.delete("/:id", async (req, res, next) => {
   try {
     const id = parseId(req, res);
     if (id === null) return;
-    const customer = await db.deleteCustomer(id);
+    const customer = await db.deleteCustomer(req.user.user_id, id);
     if (!customer) return res.status(404).json({ error: "Customer not found" });
     res.json(customer);
   } catch (err) {

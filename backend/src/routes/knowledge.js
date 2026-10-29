@@ -26,6 +26,7 @@ const isBlank = (value) => typeof value !== "string" || !value.trim();
  *         schema: { type: string }
  *         description: Case-insensitive match on title, category or content
  *     responses:
+ *       401: { $ref: '#/components/responses/Unauthorized' }
  *       200:
  *         description: Array of articles
  *         content:
@@ -52,6 +53,7 @@ router.get("/", async (req, res, next) => {
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: integer } }
  *     responses:
+ *       401: { $ref: '#/components/responses/Unauthorized' }
  *       200:
  *         description: The article
  *         content:
@@ -83,6 +85,7 @@ router.get("/:id", async (req, res, next) => {
  *         application/json:
  *           schema: { $ref: '#/components/schemas/ArticleInput' }
  *     responses:
+ *       401: { $ref: '#/components/responses/Unauthorized' }
  *       201:
  *         description: Created article
  *         content:
@@ -117,6 +120,7 @@ router.post("/", async (req, res, next) => {
  *         application/json:
  *           schema: { $ref: '#/components/schemas/ArticleUpdate' }
  *     responses:
+ *       401: { $ref: '#/components/responses/Unauthorized' }
  *       200:
  *         description: Updated article
  *         content:
@@ -148,6 +152,7 @@ router.put("/:id", async (req, res, next) => {
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: integer } }
  *     responses:
+ *       401: { $ref: '#/components/responses/Unauthorized' }
  *       200:
  *         description: Deleted article
  *         content:

@@ -6,6 +6,7 @@ const MODEL = "claude-opus-5-5";
 const MAX_TOOL_ROUNDS = 8;
 
 const SYSTEM_PROMPT = `You are a customer-data assistant for an internal CRM.
+You only have access to the customers assigned to the signed-in sales person; if a customer is not found, say so and do not speculate about other users' data.
 Answer questions about customers using the provided tools; never invent customer records.
 When the user asks to add or change a customer, call the matching tool, then confirm what was saved.
 If a name search returns several matches, list them and ask which one the user means before updating.
@@ -85,22 +86,29 @@ const tools = [
   },
 ];
 
-async function executeTool(name, input) {
+// userId always comes from the authenticated request, never from the model's tool input.
+async function executeTool(userId, name, input) {
   switch (name) {
     case "get_all_customers":
-      return db.listCustomers();
+      return db.listCustomers(userId);
     case "get_customer_by_name":
       if (typeof input.name !== "string" || !input.name.trim()) throw new Error("name is required");
-      return db.searchCustomersByName(input.name.trim());
+      return db.searchCustomersByName(userId, input.name.trim());
     case "get_customer_by_id":
       if (!Number.isInteger(input.customer_id)) throw new Error("customer_id must be an integer");
-      return (await db.getCustomerById(input.customer_id)) ?? { error: "Customer not found" };
+      return (await db.getCustomerById(userId, input.customer_id)) ?? { error: "Customer not found" };
     case "add_customer":
       if (typeof input.name !== "string" || !input.name.trim()) throw new Error("name is required");
-      return db.createCustomer({ name: input.name.trim(), email: input.email, phone: input.phone });
+      return db.createCustomer(userId, { name: input.name.trim(), email: input.email, phone: input.phone });
     case "update_customer":
       if (!Number.isInteger(input.customer_id)) throw new Error("customer_id must be an integer");
-      return (await db.updateCustomer(input.customer_id, input)) ?? { error: "Customer not found" };
+      return (
+        (await db.updateCustomer(userId, input.customer_id, {
+          name: input.name,
+          email: input.email,
+          phone: input.phone,
+        })) ?? { error: "Customer not found" }
+      );
     case "search_knowledge":
       if (typeof input.query !== "string" || !input.query.trim()) throw new Error("query is required");
       return db.searchArticles(input.query.trim());
@@ -124,13 +132,15 @@ function getClient() {
 
 // Conversation history is kept server-side and only ever appended to, so
 // assistant turns (including thinking blocks) are replayed unchanged.
+// Each conversation belongs to the user who started it.
 const conversations = new Map();
 
-export async function chat(message, conversationId) {
+export async function chat(user, message, conversationId) {
   const anthropic = getClient();
-  const id = conversationId && conversations.has(conversationId) ? conversationId : randomUUID();
-  const messages = conversations.get(id) ?? [];
-  conversations.set(id, messages);
+  const existing = conversationId && conversations.get(conversationId);
+  const id = existing?.userId === user.user_id ? conversationId : randomUUID();
+  if (id !== conversationId) conversations.set(id, { userId: user.user_id, messages: [] });
+  const { messages } = conversations.get(id);
 
   messages.push({ role: "user", content: message });
   const toolCalls = [];
@@ -167,7 +177,7 @@ export async function chat(message, conversationId) {
       toolUses.map(async (block) => {
         toolCalls.push({ name: block.name, input: block.input });
         try {
-          const result = await executeTool(block.name, block.input ?? {});
+          const result = await executeTool(user.user_id, block.name, block.input ?? {});
           return { type: "tool_result", tool_use_id: block.id, content: JSON.stringify(result) };
         } catch (err) {
           return { type: "tool_result", tool_use_id: block.id, content: err.message, is_error: true };
@@ -180,6 +190,6 @@ export async function chat(message, conversationId) {
   return { conversationId: id, reply: "I stopped after too many tool calls. Please rephrase your request.", toolCalls };
 }
 
-export function resetConversation(conversationId) {
-  conversations.delete(conversationId);
+export function resetConversation(userId, conversationId) {
+  if (conversations.get(conversationId)?.userId === userId) conversations.delete(conversationId);
 }

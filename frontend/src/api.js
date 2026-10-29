@@ -1,13 +1,29 @@
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000'
 
+let authToken = null
+let unauthorizedHandler = null
+
+export function setAuthToken(token) {
+  authToken = token
+}
+
+export function onUnauthorized(handler) {
+  unauthorizedHandler = handler
+}
+
 async function request(path, options = {}) {
   const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+    },
     ...options,
     body: options.body ? JSON.stringify(options.body) : undefined,
   })
   if (res.status === 204) return null
   const data = await res.json().catch(() => ({}))
+  // A rejected token means the session is over; login failures are handled by the form.
+  if (res.status === 401 && authToken) unauthorizedHandler?.()
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`)
   return data
 }
@@ -15,6 +31,9 @@ async function request(path, options = {}) {
 export const api = {
   baseUrl: BASE_URL,
   health: () => request('/api/health'),
+  register: (body) => request('/api/auth/register', { method: 'POST', body }),
+  login: (body) => request('/api/auth/login', { method: 'POST', body }),
+  me: () => request('/api/auth/me'),
   listCustomers: (name) =>
     request(`/api/customers${name ? `?name=${encodeURIComponent(name)}` : ''}`),
   createCustomer: (body) => request('/api/customers', { method: 'POST', body }),
