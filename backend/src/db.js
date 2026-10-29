@@ -5,7 +5,7 @@ export const pool = new pg.Pool({
   ssl: { rejectUnauthorized: false },
 });
 
-// The user table and the customer owner column are created on first use, like the knowledge table.
+// The user, job title and customer owner schema is created on first use, like the knowledge table.
 let authReady;
 function ensureAuthSchema() {
   authReady ??= pool
@@ -19,7 +19,15 @@ function ensureAuthSchema() {
          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
        );
        ALTER TABLE customer ADD COLUMN IF NOT EXISTS sales_user_id INTEGER REFERENCES app_user(user_id);
-       CREATE INDEX IF NOT EXISTS customer_sales_user_id_idx ON customer (sales_user_id);`,
+       CREATE INDEX IF NOT EXISTS customer_sales_user_id_idx ON customer (sales_user_id);
+       CREATE TABLE IF NOT EXISTS job_title (
+         job_title_id SERIAL PRIMARY KEY,
+         name TEXT NOT NULL,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+       );
+       CREATE UNIQUE INDEX IF NOT EXISTS job_title_name_lower_idx ON job_title (lower(name));
+       ALTER TABLE app_user ADD COLUMN IF NOT EXISTS job_title_id INTEGER
+         REFERENCES job_title(job_title_id) ON DELETE SET NULL;`,
     )
     .catch((err) => {
       authReady = undefined;
@@ -28,19 +36,13 @@ function ensureAuthSchema() {
   return authReady;
 }
 
-const USER_COLUMNS = "user_id, name, email, role, created_at";
-
-export async function createUser({ name, email, passwordHash }) {
-  await ensureAuthSchema();
+// Runs fn, turning a unique-constraint violation into a 409 with the given message.
+async function withConflict(message, fn) {
   try {
-    const { rows } = await pool.query(
-      `INSERT INTO app_user (name, email, password_hash, role) VALUES ($1, $2, $3, 'sales') RETURNING ${USER_COLUMNS}`,
-      [name, email, passwordHash],
-    );
-    return rows[0];
+    return await fn();
   } catch (err) {
     if (err.code === "23505") {
-      const conflict = new Error("Email is already registered");
+      const conflict = new Error(message);
       conflict.status = 409;
       throw conflict;
     }
@@ -48,39 +50,100 @@ export async function createUser({ name, email, passwordHash }) {
   }
 }
 
+const EMAIL_TAKEN = "Email is already registered";
+
+// Every user read includes the job title, so all user responses have the same shape.
+const userSelect = (extra = "") => `
+  SELECT u.user_id, u.name, u.email, u.role, u.job_title_id, jt.name AS job_title, u.created_at${extra}
+  FROM app_user u LEFT JOIN job_title jt ON jt.job_title_id = u.job_title_id`;
+
+export async function createUser({ name, email, passwordHash, role = "sales", jobTitleId = null }) {
+  await ensureAuthSchema();
+  const { rows } = await withConflict(EMAIL_TAKEN, () =>
+    pool.query(
+      `INSERT INTO app_user (name, email, password_hash, role, job_title_id) VALUES ($1, $2, $3, $4, $5) RETURNING user_id`,
+      [name, email, passwordHash, role, jobTitleId],
+    ),
+  );
+  return getUserById(rows[0].user_id);
+}
+
 // Includes password_hash; only for verifying a login.
 export async function getUserByEmail(email) {
   await ensureAuthSchema();
-  const { rows } = await pool.query(`SELECT ${USER_COLUMNS}, password_hash FROM app_user WHERE email = $1`, [email]);
+  const { rows } = await pool.query(`${userSelect(", u.password_hash")} WHERE u.email = $1`, [email]);
   return rows[0] ?? null;
 }
 
 export async function getUserById(id) {
   await ensureAuthSchema();
-  const { rows } = await pool.query(`SELECT ${USER_COLUMNS} FROM app_user WHERE user_id = $1`, [id]);
+  const { rows } = await pool.query(`${userSelect()} WHERE u.user_id = $1`, [id]);
   return rows[0] ?? null;
 }
 
-const USER_WITH_COUNT = `
-  SELECT u.user_id, u.name, u.email, u.role, u.created_at, count(c.customer_id)::int AS customer_count
-  FROM app_user u LEFT JOIN customer c ON c.sales_user_id = u.user_id`;
+const USER_WITH_COUNT = `${userSelect(", (SELECT count(*)::int FROM customer c WHERE c.sales_user_id = u.user_id) AS customer_count")}`;
 
 export async function listUsersWithCounts() {
   await ensureAuthSchema();
-  const { rows } = await pool.query(`${USER_WITH_COUNT} GROUP BY u.user_id ORDER BY u.user_id`);
+  const { rows } = await pool.query(`${USER_WITH_COUNT} ORDER BY u.user_id`);
   return rows;
 }
 
 export async function getUserWithCount(id) {
   await ensureAuthSchema();
-  const { rows } = await pool.query(`${USER_WITH_COUNT} WHERE u.user_id = $1 GROUP BY u.user_id`, [id]);
+  const { rows } = await pool.query(`${USER_WITH_COUNT} WHERE u.user_id = $1`, [id]);
   return rows[0] ?? null;
 }
 
 export async function setUserRole(id, role) {
+  return updateUser(id, { role });
+}
+
+// Changes only the fields present in `fields`; jobTitleId: null clears the job title.
+export async function updateUser(id, fields) {
   await ensureAuthSchema();
-  const { rows } = await pool.query(`UPDATE app_user SET role = $2 WHERE user_id = $1 RETURNING ${USER_COLUMNS}`, [id, role]);
-  return rows[0] ?? null;
+  const columns = { name: "name", email: "email", passwordHash: "password_hash", role: "role", jobTitleId: "job_title_id" };
+  const params = [id];
+  const sets = [];
+  for (const [key, column] of Object.entries(columns)) {
+    if (key in fields) {
+      params.push(fields[key]);
+      sets.push(`${column} = $${params.length}`);
+    }
+  }
+  if (sets.length > 0) {
+    const { rowCount } = await withConflict(EMAIL_TAKEN, () =>
+      pool.query(`UPDATE app_user SET ${sets.join(", ")} WHERE user_id = $1`, params),
+    );
+    if (rowCount === 0) return null;
+  }
+  return getUserById(id);
+}
+
+// Moves the user's customers to reassignTo (null = unassigned), then deletes the user, all-or-nothing.
+// Customers are never deleted with their owner.
+export async function deleteUser(id, reassignTo = null) {
+  await ensureAuthSchema();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const moved = await client.query("UPDATE customer SET sales_user_id = $2 WHERE sales_user_id = $1", [id, reassignTo]);
+    const { rows } = await client.query(
+      "DELETE FROM app_user WHERE user_id = $1 RETURNING user_id, name, email, role",
+      [id],
+    );
+    if (rows.length === 0) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    await client.query("COMMIT");
+    return { deleted_user: rows[0], customers_moved: moved.rowCount, reassigned_to: reassignTo };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 export async function countCustomersOwnedBy(userId) {
@@ -94,6 +157,55 @@ export async function isSalesUser(id) {
   await ensureAuthSchema();
   const { rows } = await pool.query("SELECT 1 FROM app_user WHERE user_id = $1 AND role = 'sales'", [id]);
   return rows.length > 0;
+}
+
+// Job titles are descriptive labels only; access is decided by role.
+const JOB_TITLE_TAKEN = "A job title with this name already exists";
+const JOB_TITLE_SELECT = `
+  SELECT jt.job_title_id, jt.name, jt.created_at,
+         (SELECT count(*)::int FROM app_user u WHERE u.job_title_id = jt.job_title_id) AS user_count
+  FROM job_title jt`;
+
+export async function listJobTitles() {
+  await ensureAuthSchema();
+  const { rows } = await pool.query(`${JOB_TITLE_SELECT} ORDER BY lower(jt.name)`);
+  return rows;
+}
+
+async function getJobTitle(id) {
+  const { rows } = await pool.query(`${JOB_TITLE_SELECT} WHERE jt.job_title_id = $1`, [id]);
+  return rows[0] ?? null;
+}
+
+export async function jobTitleExists(id) {
+  await ensureAuthSchema();
+  const { rows } = await pool.query("SELECT 1 FROM job_title WHERE job_title_id = $1", [id]);
+  return rows.length > 0;
+}
+
+export async function createJobTitle(name) {
+  await ensureAuthSchema();
+  const { rows } = await withConflict(JOB_TITLE_TAKEN, () =>
+    pool.query("INSERT INTO job_title (name) VALUES ($1) RETURNING job_title_id", [name]),
+  );
+  return getJobTitle(rows[0].job_title_id);
+}
+
+export async function renameJobTitle(id, name) {
+  await ensureAuthSchema();
+  const { rowCount } = await withConflict(JOB_TITLE_TAKEN, () =>
+    pool.query("UPDATE job_title SET name = $2 WHERE job_title_id = $1", [id, name]),
+  );
+  return rowCount === 0 ? null : getJobTitle(id);
+}
+
+// Users with this title are left without one (ON DELETE SET NULL).
+export async function deleteJobTitle(id) {
+  await ensureAuthSchema();
+  const title = await getJobTitle(id);
+  if (!title) return null;
+  await pool.query("DELETE FROM job_title WHERE job_title_id = $1", [id]);
+  return title;
 }
 
 // Customer access depends on the caller's role. Sales users are always limited to their own rows;

@@ -49,6 +49,15 @@ export const api = {
     request('/api/customers/assign', { method: 'POST', body: { customer_ids: customerIds, sales_user_id: salesUserId } }),
   listUsers: () => request('/api/users'),
   setUserRole: (id, role) => request(`/api/users/${id}/role`, { method: 'PATCH', body: { role } }),
+  createUser: (body) => request('/api/users', { method: 'POST', body }),
+  updateUser: (id, body) => request(`/api/users/${id}`, { method: 'PATCH', body }),
+  // reassignTo: a sales user's id, or null to leave the deleted user's customers unassigned.
+  deleteUser: (id, reassignTo) =>
+    request(`/api/users/${id}`, { method: 'DELETE', body: { reassign_to: reassignTo } }),
+  listJobTitles: () => request('/api/job-titles'),
+  createJobTitle: (name) => request('/api/job-titles', { method: 'POST', body: { name } }),
+  renameJobTitle: (id, name) => request(`/api/job-titles/${id}`, { method: 'PATCH', body: { name } }),
+  deleteJobTitle: (id) => request(`/api/job-titles/${id}`, { method: 'DELETE' }),
   listArticles: (q) =>
     request(`/api/knowledge${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   createArticle: (body) => request('/api/knowledge', { method: 'POST', body }),

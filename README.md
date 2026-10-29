@@ -52,7 +52,9 @@ CORS allows `FRONTEND_ORIGIN` (default `http://localhost:5173`).
   npm run make-admin -- you@example.com
   ```
 
-- In the UI, admins get a **Users** page, an **Owner** column and filter, bulk **Assign to…** on Customers, an **Owner** field in the customer form, and an "Unassigned customers" card on the Dashboard.
+- **Managing users:** `POST /api/users` adds a user (name, email, initial password, role, job title). `PATCH /api/users/{id}` edits any of those; sending `password` sets a new one. `DELETE /api/users/{id}` deletes a user, with an optional `{ reassign_to: <sales user id> }` that receives their customers. Without it, the customers become unassigned. **Customers are never deleted with their owner.** An admin can't delete their own account or change their own role.
+- **Job titles:** `GET/POST /api/job-titles` and `PATCH/DELETE /api/job-titles/{id}` (admin only). Names are unique, ignoring upper/lower case. Deleting a title leaves its users with no title. A job title is only a label: access is still decided by role.
+- In the UI, admins get a **Users** page (add, edit and delete users, plus a **Job titles** section), an **Owner** column and filter, bulk **Assign to…** on Customers, an **Owner** field in the customer form, and an "Unassigned customers" card on the Dashboard.
 
 ## Frontend
 

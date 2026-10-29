@@ -75,7 +75,7 @@ function MainLayout() {
           <span className="avatar">{user.name.slice(0, 2).toUpperCase()}</span>
           <div className="user-info">
             <span className="user-name">{user.name}</span>
-            <span className="user-role">{t.roles[user.role] ?? user.role}</span>
+            <span className="user-role">{user.job_title ?? t.roles[user.role] ?? user.role}</span>
           </div>
           <button className="logout-btn" onClick={logout} title={t.logout}>{t.logout}</button>
         </div>

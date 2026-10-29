@@ -1,10 +1,9 @@
 import { Router } from "express";
 import * as db from "../db.js";
-import { hashPassword, verifyPassword, signToken, requireAuth } from "../auth.js";
+import { hashPassword, verifyPassword, signToken, requireAuth, EMAIL_RE, MIN_PASSWORD_LENGTH } from "../auth.js";
 
 const router = Router();
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const isBlank = (value) => typeof value !== "string" || !value.trim();
 
 /**
@@ -36,7 +35,7 @@ router.post("/register", async (req, res, next) => {
     if (isBlank(email) || !EMAIL_RE.test(email.trim())) {
       return res.status(400).json({ error: "a valid email is required" });
     }
-    if (typeof password !== "string" || password.length < 8) {
+    if (typeof password !== "string" || password.length < MIN_PASSWORD_LENGTH) {
       return res.status(400).json({ error: "password must be at least 8 characters" });
     }
     const user = await db.createUser({

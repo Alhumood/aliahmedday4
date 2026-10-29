@@ -38,7 +38,8 @@ export const swaggerSpec = swaggerJsdoc({
         "click **Authorize**, paste it, then try the Customers and Agent endpoints.",
         "",
         "**Admins** see every customer (with `sales_user_name`), can assign customers to sales users and manage roles",
-        "under **Users**. Make the first admin locally with `npm run make-admin -- <email>` after registering, then log in again.",
+        "under **Users**, including adding, editing and deleting users. Admins also manage **Job Titles** (labels only, not permissions).",
+        "Make the first admin locally with `npm run make-admin -- <email>` after registering, then log in again.",
       ].join("\n"),
     },
     servers: [{ url: "/", description: "Current host" }],
@@ -90,8 +91,68 @@ export const swaggerSpec = swaggerJsdoc({
             name: { type: "string", example: "Sara Sales" },
             email: { type: "string", example: "sara@example.com" },
             role: { type: "string", enum: ["sales", "admin"], example: "sales" },
+            job_title_id: { type: "integer", nullable: true, example: 1 },
+            job_title: { type: "string", nullable: true, example: "Account Manager", description: "A label only; access depends on role" },
             created_at: { type: "string", format: "date-time" },
           },
+        },
+        UserCreate: {
+          type: "object",
+          required: ["name", "email", "password"],
+          properties: {
+            name: { type: "string", example: "Omar Sales" },
+            email: { type: "string", format: "email", example: "omar@example.com" },
+            password: { type: "string", format: "password", minLength: 8, example: "password123" },
+            role: { type: "string", enum: ["sales", "admin"], default: "sales" },
+            job_title_id: { type: "integer", nullable: true, example: 1 },
+          },
+        },
+        UserUpdate: {
+          type: "object",
+          description: "Only the fields sent are changed.",
+          properties: {
+            name: { type: "string" },
+            email: { type: "string", format: "email" },
+            password: { type: "string", format: "password", minLength: 8, description: "Sets a new password" },
+            role: { type: "string", enum: ["sales", "admin"] },
+            job_title_id: { type: "integer", nullable: true, description: "null clears the job title" },
+          },
+        },
+        UserDelete: {
+          type: "object",
+          properties: {
+            reassign_to: {
+              type: "integer",
+              nullable: true,
+              example: 2,
+              description: "Sales user who receives the deleted user's customers; null or omitted leaves them unassigned",
+            },
+          },
+        },
+        UserDeleteResult: {
+          type: "object",
+          properties: {
+            deleted_user: {
+              type: "object",
+              properties: { user_id: { type: "integer" }, name: { type: "string" }, email: { type: "string" }, role: { type: "string" } },
+            },
+            customers_moved: { type: "integer", example: 3 },
+            reassigned_to: { type: "integer", nullable: true, example: 2 },
+          },
+        },
+        JobTitle: {
+          type: "object",
+          properties: {
+            job_title_id: { type: "integer", example: 1 },
+            name: { type: "string", example: "Account Manager" },
+            created_at: { type: "string", format: "date-time" },
+            user_count: { type: "integer", example: 3 },
+          },
+        },
+        JobTitleInput: {
+          type: "object",
+          required: ["name"],
+          properties: { name: { type: "string", maxLength: 100, example: "Account Manager" } },
         },
         UserWithCount: {
           allOf: [

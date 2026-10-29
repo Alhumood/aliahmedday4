@@ -6,6 +6,7 @@ import { pool } from "./db.js";
 import { requireAuth } from "./auth.js";
 import authRoutes from "./routes/auth.js";
 import usersRoutes from "./routes/users.js";
+import jobTitlesRoutes from "./routes/jobTitles.js";
 import customerRoutes from "./routes/customers.js";
 import agentRoutes from "./routes/agent.js";
 import knowledgeRoutes from "./routes/knowledge.js";
@@ -57,6 +58,7 @@ app.get("/api/health", async (_req, res) => {
 
 app.use("/api/auth", authRoutes);
 app.use("/api/users", requireAuth, usersRoutes);
+app.use("/api/job-titles", requireAuth, jobTitlesRoutes);
 app.use("/api/customers", requireAuth, customerRoutes);
 app.use("/api/knowledge", requireAuth, knowledgeRoutes);
 app.use("/api/agent", requireAuth, agentRoutes);

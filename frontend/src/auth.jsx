@@ -54,6 +54,8 @@ export function AuthProvider({ children }) {
     user: session?.user ?? null,
     login: async (credentials) => start(await api.login(credentials)),
     register: async (details) => start(await api.register(details)),
+    // Re-reads the current user, e.g. after an admin edits their own name or job title.
+    refresh: () => api.me().then((user) => setSession((s) => s && { ...s, user })).catch(() => {}),
     logout,
   }
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

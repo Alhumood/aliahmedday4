@@ -274,3 +274,23 @@ tbody tr:hover { background: #fafbff; }
   .toolbar { flex-wrap: wrap; }
   .toolbar .select { max-width: none; flex: 1; }
 }
+
+/* Admin: user actions and job titles */
+.nowrap { white-space: nowrap; }
+.modal-text { margin: 0; line-height: 1.5; }
+.job-titles { margin-top: 20px; }
+.job-titles-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 16px; border-bottom: 1px solid var(--border); }
+.job-titles-header .muted.small { margin: 4px 0 0; }
+.job-title-add, .job-title-rename { display: flex; gap: 8px; align-items: center; }
+.job-title-add .search { width: 220px; }
+.job-title-rename { flex: 1; }
+.job-title-rename .search { flex: 1; max-width: 320px; padding: 6px 10px; }
+.job-title-list { list-style: none; margin: 0; padding: 0; }
+.job-title-row { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-top: 1px solid var(--border); min-height: 52px; }
+.job-title-row:first-child { border-top: 0; }
+.job-title-name { font-weight: 600; }
+.job-title-actions { margin-inline-start: auto; white-space: nowrap; }
+@media (max-width: 760px) {
+  .job-title-add { width: 100%; }
+  .job-title-add .search { flex: 1; width: auto; }
+}

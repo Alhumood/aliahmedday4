@@ -3,6 +3,8 @@ import jwt from "jsonwebtoken";
 import { getUserById } from "./db.js";
 
 const TOKEN_LIFETIME = "8h";
+export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const MIN_PASSWORD_LENGTH = 8;
 
 function getSecret() {
   if (!process.env.JWT_SECRET) {

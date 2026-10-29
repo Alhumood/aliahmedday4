@@ -2,6 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api.js'
 import { useAuth } from '../auth.jsx'
 import { useI18n } from '../i18n.jsx'
+import Modal from './Modal.jsx'
+import UserForm from './UserForm.jsx'
+import JobTitlesCard from './JobTitlesCard.jsx'
 
 const formatDate = (value, locale) =>
   value ? new Date(value).toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
@@ -11,18 +14,26 @@ const initials = (name) =>
 
 export default function UsersPage({ onViewCustomers }) {
   const { t, locale } = useI18n()
-  const { user: me } = useAuth()
+  const { user: me, refresh } = useAuth()
   const [users, setUsers] = useState([])
+  const [jobTitles, setJobTitles] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(null) // user_id whose role is being changed
+  const [editing, setEditing] = useState(null) // null | 'new' | user
+  const [deleting, setDeleting] = useState(null)
+  const [reassignTo, setReassignTo] = useState('')
+  const [deleteError, setDeleteError] = useState('')
   const [toast, setToast] = useState('')
 
+  // `loading` is only true until the first load finishes, so later refreshes keep the current rows
+  // on screen instead of flashing "Loading…".
   const load = useCallback(async () => {
-    setLoading(true)
     setError('')
     try {
-      setUsers(await api.listUsers())
+      const [userList, titleList] = await Promise.all([api.listUsers(), api.listJobTitles()])
+      setUsers(userList)
+      setJobTitles(titleList)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -34,13 +45,17 @@ export default function UsersPage({ onViewCustomers }) {
     load()
   }, [load])
 
+  function notify(message) {
+    setToast(message)
+    setTimeout(() => setToast(''), 2500)
+  }
+
   async function changeRole(u, role) {
     setSaving(u.user_id)
     setError('')
     try {
       await api.setUserRole(u.user_id, role)
-      setToast(t.roleUpdated(u.name, t.roles[role]))
-      setTimeout(() => setToast(''), 2500)
+      notify(t.roleUpdated(u.name, t.roles[role]))
       await load()
     } catch (err) {
       setError(err.message)
@@ -49,7 +64,38 @@ export default function UsersPage({ onViewCustomers }) {
     }
   }
 
+  async function handleSave(body) {
+    if (editing === 'new') {
+      await api.createUser(body)
+      notify(t.userCreated(body.name))
+    } else {
+      await api.updateUser(editing.user_id, body)
+      notify(t.userUpdated(body.name ?? editing.name))
+      if (editing.user_id === me.user_id) refresh()
+    }
+    setEditing(null)
+    load()
+  }
+
+  function startDelete(u) {
+    setDeleting(u)
+    setReassignTo('')
+    setDeleteError('')
+  }
+
+  async function handleDelete() {
+    try {
+      const result = await api.deleteUser(deleting.user_id, reassignTo ? Number(reassignTo) : null)
+      notify(t.userDeleted(deleting.name, result.customers_moved))
+      setDeleting(null)
+      load()
+    } catch (err) {
+      setDeleteError(err.message)
+    }
+  }
+
   const count = (role) => (loading ? '—' : users.filter((u) => u.role === role).length)
+  const reassignTargets = deleting ? users.filter((u) => u.role === 'sales' && u.user_id !== deleting.user_id) : []
 
   return (
     <div className="page">
@@ -60,6 +106,7 @@ export default function UsersPage({ onViewCustomers }) {
         </div>
         <div className="header-actions">
           <button className="btn ghost" onClick={load}>{t.refresh}</button>
+          <button className="btn primary" onClick={() => setEditing('new')}>{t.addUser}</button>
         </div>
       </header>
 
@@ -85,6 +132,7 @@ export default function UsersPage({ onViewCustomers }) {
             <thead>
               <tr>
                 <th>{t.colUser}</th>
+                <th>{t.jobTitle}</th>
                 <th>{t.colRole}</th>
                 <th>{t.colCustomers}</th>
                 <th>{t.colCreated}</th>
@@ -93,9 +141,9 @@ export default function UsersPage({ onViewCustomers }) {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={5} className="empty">{t.loading}</td></tr>
+                <tr><td colSpan={6} className="empty">{t.loading}</td></tr>
               ) : users.length === 0 ? (
-                <tr><td colSpan={5} className="empty">{t.noUsers}</td></tr>
+                <tr><td colSpan={6} className="empty">{t.noUsers}</td></tr>
               ) : (
                 users.map((u) => {
                   const isMe = u.user_id === me.user_id
@@ -112,6 +160,7 @@ export default function UsersPage({ onViewCustomers }) {
                           </div>
                         </div>
                       </td>
+                      <td>{u.job_title ?? <span className="muted">—</span>}</td>
                       <td>
                         <select
                           className="select"
@@ -119,6 +168,7 @@ export default function UsersPage({ onViewCustomers }) {
                           disabled={isMe || saving === u.user_id}
                           title={isMe ? t.cannotChangeOwnRole : undefined}
                           onChange={(e) => changeRole(u, e.target.value)}
+                          aria-label={t.colRole}
                         >
                           <option value="sales">{t.roles.sales}</option>
                           <option value="admin">{t.roles.admin}</option>
@@ -126,11 +176,15 @@ export default function UsersPage({ onViewCustomers }) {
                       </td>
                       <td>{u.role === 'sales' ? u.customer_count : <span className="muted">—</span>}</td>
                       <td className="muted">{formatDate(u.created_at, locale)}</td>
-                      <td className="end">
+                      <td className="end nowrap">
                         {u.role === 'sales' && (
-                          <button className="btn small ghost" onClick={() => onViewCustomers(String(u.user_id))}>
+                          <button className="btn small primary-ghost" onClick={() => onViewCustomers(String(u.user_id))}>
                             {t.viewCustomers}
                           </button>
+                        )}
+                        <button className="btn small ghost" onClick={() => setEditing(u)}>{t.edit}</button>
+                        {!isMe && (
+                          <button className="btn small danger-ghost" onClick={() => startDelete(u)}>{t.delete}</button>
                         )}
                       </td>
                     </tr>
@@ -141,6 +195,44 @@ export default function UsersPage({ onViewCustomers }) {
           </table>
         </div>
       </div>
+
+      {!loading && <JobTitlesCard jobTitles={jobTitles} onChanged={load} notify={notify} />}
+
+      {editing && (
+        <Modal title={editing === 'new' ? t.addUser.replace('+ ', '') : t.editUser} onClose={() => setEditing(null)}>
+          <UserForm
+            initial={editing === 'new' ? null : editing}
+            jobTitles={jobTitles}
+            isSelf={editing !== 'new' && editing.user_id === me.user_id}
+            onSubmit={handleSave}
+            onCancel={() => setEditing(null)}
+          />
+        </Modal>
+      )}
+
+      {deleting && (
+        <Modal title={t.deleteUser} onClose={() => setDeleting(null)}>
+          <div className="form">
+            <p className="modal-text">{t.deleteUserConfirm(deleting.name)}</p>
+            {deleting.customer_count > 0 && (
+              <label>
+                {t.moveCustomersTo(deleting.customer_count)}
+                <select className="select" value={reassignTo} onChange={(e) => setReassignTo(e.target.value)}>
+                  <option value="">{t.unassigned}</option>
+                  {reassignTargets.map((u) => (
+                    <option key={u.user_id} value={u.user_id}>{u.name}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {deleteError && <div className="alert error">{deleteError}</div>}
+            <div className="form-actions">
+              <button className="btn ghost" onClick={() => setDeleting(null)}>{t.cancel}</button>
+              <button className="btn danger" onClick={handleDelete}>{t.delete}</button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {toast && <div className="toast">{toast}</div>}
     </div>
