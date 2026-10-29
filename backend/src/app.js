@@ -8,6 +8,7 @@ import authRoutes from "./routes/auth.js";
 import usersRoutes from "./routes/users.js";
 import rolesRoutes from "./routes/roles.js";
 import customerRoutes from "./routes/customers.js";
+import dealRoutes from "./routes/deals.js";
 import agentRoutes from "./routes/agent.js";
 import knowledgeRoutes from "./routes/knowledge.js";
 
@@ -61,6 +62,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/users", requireAuth, usersRoutes);
 app.use("/api/roles", requireAuth, rolesRoutes);
 app.use("/api/customers", requireAuth, customerRoutes);
+app.use("/api/deals", requireAuth, dealRoutes);
 app.use("/api/knowledge", requireAuth, knowledgeRoutes);
 app.use("/api/agent", requireAuth, requirePermission("agent.use"), agentRoutes);
 

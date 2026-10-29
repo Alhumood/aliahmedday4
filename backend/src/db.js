@@ -1,5 +1,6 @@
 import pg from "pg";
 import { SYSTEM_ROLES, can } from "./permissions.js";
+import { CLOSED_STAGES, DEAL_STAGES, OPEN_STAGES } from "./deals.js";
 
 export const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
@@ -295,16 +296,25 @@ function ownerScope(user, params, salesUserId) {
   return "TRUE";
 }
 
+// The list also counts each customer's deals (all, and open ones), for the Customers table and delete warning.
 export async function listCustomers(user, { name, salesUserId } = {}) {
-  await ensureAuthSchema();
+  await ensureDealSchema();
   const params = [];
   const conditions = [ownerScope(user, params, salesUserId)];
   if (name) {
     params.push(`%${name}%`);
     conditions.push(`c.name ILIKE $${params.length}`);
   }
+  params.push(OPEN_STAGES);
   const { rows } = await pool.query(
-    `${customerSelect(user, "customer")} WHERE ${conditions.join(" AND ")} ORDER BY c.customer_id`,
+    `SELECT l.*, COALESCE(dc.deals_count, 0) AS deals_count, COALESCE(dc.open_deals_count, 0) AS open_deals_count
+     FROM (${customerSelect(user, "customer")} WHERE ${conditions.join(" AND ")}) l
+     LEFT JOIN (
+       SELECT customer_id, count(*)::int AS deals_count,
+              (count(*) FILTER (WHERE stage = ANY($${params.length}::text[])))::int AS open_deals_count
+       FROM deal GROUP BY customer_id
+     ) dc ON dc.customer_id = l.customer_id
+     ORDER BY l.customer_id`,
     params,
   );
   return rows;
@@ -392,7 +402,191 @@ export async function assignCustomers(user, customerIds, salesUserId) {
   }
 }
 
-const KNOWLEDGE_COLUMNS = "article_id, title, category, content, created_at, updated_at";
+// Deals (spec 05) belong to a customer and have no owner of their own: every deal query joins the customer
+// and uses ownerScope(), so a deal is visible exactly when its customer is.
+// The first run also gives the built-in Admin and Sales roles the new deals.delete permission. It only runs
+// while the deal table doesn't exist yet, so an admin who later removes it from Sales isn't overridden.
+let dealsReady;
+function ensureDealSchema() {
+  dealsReady ??= ensureAuthSchema()
+    .then(() =>
+      pool.query(
+        `DO $$
+         BEGIN
+           IF to_regclass('deal') IS NULL THEN
+             UPDATE role SET permissions = array_append(permissions, 'deals.delete')
+             WHERE system_key IN ('admin', 'sales') AND NOT 'deals.delete' = ANY(permissions);
+           END IF;
+         END $$;
+         CREATE TABLE IF NOT EXISTS deal (
+           deal_id SERIAL PRIMARY KEY,
+           customer_id INTEGER NOT NULL REFERENCES customer(customer_id) ON DELETE CASCADE,
+           title TEXT NOT NULL,
+           amount NUMERIC(14,2) NOT NULL CHECK (amount >= 0),
+           stage TEXT NOT NULL DEFAULT 'lead' CHECK (stage IN (${DEAL_STAGES.map((s) => `'${s}'`).join(", ")})),
+           expected_close_date DATE,
+           closed_at TIMESTAMPTZ,
+           created_by INTEGER REFERENCES app_user(user_id) ON DELETE SET NULL,
+           created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+           updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+         );
+         CREATE INDEX IF NOT EXISTS deal_customer_id_idx ON deal (customer_id);`,
+      ),
+    )
+    .catch((err) => {
+      dealsReady = undefined;
+      throw err;
+    });
+  return dealsReady;
+}
+
+const customerNotFound = () => Object.assign(new Error("Customer not found"), { status: 404 });
+
+function dealSelect(user, source) {
+  const owner = seesAll(user) ? ", c.sales_user_id, u.name AS sales_user_name" : "";
+  return `SELECT d.deal_id, d.customer_id, c.name AS customer_name, d.title, d.amount::float8 AS amount, d.stage,
+                 to_char(d.expected_close_date, 'YYYY-MM-DD') AS expected_close_date, d.closed_at, d.created_by,
+                 d.created_at, d.updated_at${owner}
+          FROM ${source} d JOIN customer c ON c.customer_id = d.customer_id
+          LEFT JOIN app_user u ON u.user_id = c.sales_user_id`;
+}
+
+// The condition for deals whose customer `user` can reach, as a subquery on d.customer_id.
+function dealScope(user, params) {
+  return `d.customer_id IN (SELECT c.customer_id FROM customer c WHERE ${ownerScope(user, params)})`;
+}
+
+// WHERE conditions for the deal list and summary (the query joins customer c). salesUserId as for customers.
+function dealFilters(user, params, { customerId, stage, title, salesUserId } = {}) {
+  const conditions = [ownerScope(user, params, salesUserId)];
+  if (customerId !== undefined) {
+    params.push(customerId);
+    conditions.push(`d.customer_id = $${params.length}`);
+  }
+  if (stage !== undefined) {
+    params.push(stage === "open" ? OPEN_STAGES : stage === "closed" ? CLOSED_STAGES : [stage]);
+    conditions.push(`d.stage = ANY($${params.length}::text[])`);
+  }
+  if (title) {
+    params.push(`%${title}%`);
+    conditions.push(`d.title ILIKE $${params.length}`);
+  }
+  return conditions.join(" AND ");
+}
+
+export async function listDeals(user, filters = {}) {
+  await ensureDealSchema();
+  const params = [];
+  const where = dealFilters(user, params, filters);
+  const { rows } = await pool.query(
+    `${dealSelect(user, "deal")} WHERE ${where} ORDER BY d.created_at DESC, d.deal_id DESC`,
+    params,
+  );
+  return rows;
+}
+
+// Counts and totals per stage for the same filters as the list. Every stage is present, zeros included.
+export async function dealSummary(user, filters = {}) {
+  await ensureDealSchema();
+  const params = [];
+  const where = dealFilters(user, params, filters);
+  const { rows } = await pool.query(
+    `SELECT d.stage, count(*)::int AS count, COALESCE(sum(d.amount), 0)::float8 AS amount
+     FROM deal d JOIN customer c ON c.customer_id = d.customer_id
+     WHERE ${where} GROUP BY d.stage`,
+    params,
+  );
+  const byStage = DEAL_STAGES.map(
+    (stage) => rows.find((row) => row.stage === stage) ?? { stage, count: 0, amount: 0 },
+  );
+  const total = (stages) =>
+    byStage
+      .filter((row) => stages.includes(row.stage))
+      .reduce((sum, row) => ({ count: sum.count + row.count, amount: sum.amount + row.amount }), { count: 0, amount: 0 });
+  const open = total(OPEN_STAGES);
+  const won = total(["won"]);
+  return {
+    open_count: open.count,
+    open_amount: open.amount,
+    won_count: won.count,
+    won_amount: won.amount,
+    lost_count: total(["lost"]).count,
+    by_stage: byStage,
+  };
+}
+
+export async function getDealById(user, id) {
+  await ensureDealSchema();
+  const params = [id];
+  const { rows } = await pool.query(`${dealSelect(user, "deal")} WHERE d.deal_id = $1 AND ${dealScope(user, params)}`, params);
+  return rows[0] ?? null;
+}
+
+// Throws a 404 when the customer is not visible to `user`.
+export async function createDeal(user, { customerId, title, amount, stage = "lead", expectedCloseDate = null }) {
+  await ensureDealSchema();
+  const params = [customerId, title, amount, stage, expectedCloseDate, CLOSED_STAGES, user.user_id];
+  const scope = ownerScope(user, params);
+  const { rows } = await pool.query(
+    `WITH changed AS (
+       INSERT INTO deal (customer_id, title, amount, stage, expected_close_date, closed_at, created_by)
+       SELECT c.customer_id, $2, $3, $4, $5::date, CASE WHEN $4::text = ANY($6::text[]) THEN now() END, $7
+       FROM customer c WHERE c.customer_id = $1 AND ${scope}
+       RETURNING *
+     ) ${dealSelect(user, "changed")}`,
+    params,
+  );
+  if (!rows[0]) throw customerNotFound();
+  return rows[0];
+}
+
+// Only the fields present change (expectedCloseDate: null clears the date). closed_at is set when the deal
+// moves from an open to a closed stage and cleared when it moves back to an open one.
+// Returns null when the deal is not visible; throws a 404 when a new customerId is not visible.
+export async function updateDeal(user, id, fields) {
+  await ensureDealSchema();
+  if (fields.customerId !== undefined && !(await getCustomerById(user, fields.customerId))) throw customerNotFound();
+  const columns = { customerId: "customer_id", title: "title", amount: "amount", expectedCloseDate: "expected_close_date" };
+  const params = [id];
+  const sets = ["updated_at = now()"];
+  for (const [key, column] of Object.entries(columns)) {
+    if (key in fields) {
+      params.push(fields[key]);
+      sets.push(`${column} = $${params.length}`);
+    }
+  }
+  if (fields.stage !== undefined) {
+    params.push(fields.stage, CLOSED_STAGES);
+    const [stage, closed] = [`$${params.length - 1}::text`, `$${params.length}::text[]`];
+    sets.push(
+      `stage = ${stage}`,
+      `closed_at = CASE WHEN ${stage} = ANY(${closed}) THEN CASE WHEN d.stage = ANY(${closed}) THEN d.closed_at ELSE now() END END`,
+    );
+  }
+  const scope = dealScope(user, params);
+  const { rows } = await pool.query(
+    `WITH changed AS (
+       UPDATE deal d SET ${sets.join(", ")} WHERE d.deal_id = $1 AND ${scope} RETURNING d.*
+     ) ${dealSelect(user, "changed")}`,
+    params,
+  );
+  return rows[0] ?? null;
+}
+
+export async function deleteDeal(user, id) {
+  await ensureDealSchema();
+  const params = [id];
+  const scope = dealScope(user, params);
+  const { rows } = await pool.query(
+    `WITH changed AS (
+       DELETE FROM deal d WHERE d.deal_id = $1 AND ${scope} RETURNING d.*
+     ) ${dealSelect(user, "changed")}`,
+    params,
+  );
+  return rows[0] ?? null;
+}
+
+const KNOWLEDGE_COLUMNS ="article_id, title, category, content, created_at, updated_at";
 
 // The knowledge table is created on first use, so no separate migration step is needed.
 let knowledgeReady;

@@ -11,7 +11,7 @@ const formatDate = (value, locale) =>
 const initials = (name) =>
   name.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join('')
 
-export default function CustomersPage({ onChat, initialOwner = '' }) {
+export default function CustomersPage({ onChat, onViewDeals, initialOwner = '' }) {
   const { t, locale, lang } = useI18n()
   const { can } = useAuth()
   const seesAll = can('customers.view_all')
@@ -123,7 +123,7 @@ export default function CustomersPage({ onChat, initialOwner = '' }) {
     }
   }
 
-  const columns = 5 + (canAssign ? 1 : 0) + (seesAll ? 1 : 0)
+  const columns = 6 + (canAssign ? 1 : 0) + (seesAll ? 1 : 0)
 
   return (
     <div className="page">
@@ -221,6 +221,7 @@ export default function CustomersPage({ onChat, initialOwner = '' }) {
                 <th>{t.colCustomer}</th>
                 {seesAll && <th>{t.colOwner}</th>}
                 <th>{t.colPhone}</th>
+                <th>{t.colOpenDeals}</th>
                 <th>{t.colCreated}</th>
                 <th className="end">{t.colActions}</th>
               </tr>
@@ -257,11 +258,15 @@ export default function CustomersPage({ onChat, initialOwner = '' }) {
                       <td>{c.sales_user_name ?? <span className="tag muted">{t.unassigned}</span>}</td>
                     )}
                     <td>{c.phone ? <bdi>{c.phone}</bdi> : <span className="muted">—</span>}</td>
+                    <td>
+                      {c.open_deals_count > 0 ? <span className="tag">{c.open_deals_count}</span> : <span className="muted">0</span>}
+                    </td>
                     <td className="muted">{formatDate(c.created_at, locale)}</td>
                     <td className="end">
                       {onChat && (
                         <button className="btn small primary-ghost" onClick={() => onChat(t.askAboutPrompt(c))}>{t.askAi}</button>
                       )}
+                      <button className="btn small ghost" onClick={() => onViewDeals(c)}>{t.viewDeals}</button>
                       <button className="btn small ghost" onClick={() => setEditing(c)}>{t.edit}</button>
                       {canDelete && (
                         <button className="btn small danger-ghost" onClick={() => setDeleting(c)}>{t.delete}</button>
@@ -289,6 +294,7 @@ export default function CustomersPage({ onChat, initialOwner = '' }) {
       {deleting && (
         <Modal title={t.deleteCustomer} onClose={() => setDeleting(null)}>
           <p>{t.deleteConfirm(deleting.name)}</p>
+          {deleting.deals_count > 0 && <p className="alert error">{t.deleteCustomerDeals(deleting.deals_count)}</p>}
           <div className="form-actions">
             <button className="btn ghost" onClick={() => setDeleting(null)}>{t.cancel}</button>
             <button className="btn danger" onClick={handleDelete}>{t.delete}</button>

@@ -5,6 +5,7 @@ export const PERMISSIONS = [
   { key: "customers.delete", description: "Delete the customers they can see." },
   { key: "customers.assign", description: "Bulk-assign customers to an owner. Needs customers.view_all." },
   { key: "customers.export", description: "Export customers to Excel or PDF." },
+  { key: "deals.delete", description: "Delete the deals they can see." },
   { key: "knowledge.manage", description: "Add, edit and delete knowledge articles." },
   { key: "agent.use", description: "Use the AI Assistant." },
   { key: "users.manage", description: "Add, edit and delete users, and manage roles." },
@@ -17,7 +18,7 @@ export const SYSTEM_ROLES = {
   admin: { name: "Admin", permissions: PERMISSION_KEYS.filter((key) => key !== "customers.own") },
   sales: {
     name: "Sales",
-    permissions: ["customers.own", "customers.delete", "customers.export", "knowledge.manage", "agent.use"],
+    permissions: ["customers.own", "customers.delete", "customers.export", "deals.delete", "knowledge.manage", "agent.use"],
   },
 };
 

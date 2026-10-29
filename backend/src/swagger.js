@@ -1,6 +1,7 @@
 import swaggerJsdoc from "swagger-jsdoc";
 import { fileURLToPath } from "node:url";
 import { PERMISSION_KEYS } from "./permissions.js";
+import { DEAL_STAGES } from "./deals.js";
 
 const customerProps = {
   name: { type: "string", example: "Jane Doe" },
@@ -15,6 +16,14 @@ const adminOwnerProp = {
     example: 2,
     description: "Needs customers.view_all, ignored otherwise. The id of a user who can own customers, or null for unassigned.",
   },
+};
+
+const dealProps = {
+  customer_id: { type: "integer", example: 1, description: "Must be a customer you can see" },
+  title: { type: "string", maxLength: 200, example: "Brochure printing – Q4" },
+  amount: { type: "number", minimum: 0, example: 150000, description: "In the app currency (INR), at most 2 decimals" },
+  stage: { type: "string", enum: DEAL_STAGES, example: "lead" },
+  expected_close_date: { type: "string", format: "date", nullable: true, example: "2026-11-30" },
 };
 
 const articleProps = {
@@ -42,6 +51,9 @@ export const swaggerSpec = swaggerJsdoc({
         "`customers.view_all`, `customers.assign`, `users.manage`). Users with `users.manage` add, edit and delete users",
         "under **Users** and manage **Roles**. The built-in Admin role has every permission except `customers.own`.",
         "Make the first admin locally with `npm run make-admin -- <email>` after registering, then log in again.",
+        "",
+        "**Deals:** a deal is a sales opportunity with one customer. Deals follow their customer: you can see a deal",
+        "exactly when you can see its customer. Deleting a deal needs `deals.delete`; deleting a customer deletes its deals.",
       ].join("\n"),
     },
     servers: [{ url: "/", description: "Current host" }],
@@ -228,6 +240,8 @@ export const swaggerSpec = swaggerJsdoc({
             },
             sales_user_name: { type: "string", nullable: true, readOnly: true, description: "Owner's name (only with customers.view_all)" },
             created_at: { type: "string", format: "date-time" },
+            deals_count: { type: "integer", readOnly: true, description: "Number of deals (list only)" },
+            open_deals_count: { type: "integer", readOnly: true, description: "Number of open deals (list only)" },
           },
         },
         CustomerInput: { type: "object", required: ["name"], properties: customerProps },
@@ -245,6 +259,43 @@ export const swaggerSpec = swaggerJsdoc({
             ...articleProps,
             created_at: { type: "string", format: "date-time" },
             updated_at: { type: "string", format: "date-time" },
+          },
+        },
+        Deal: {
+          type: "object",
+          properties: {
+            deal_id: { type: "integer", example: 1 },
+            ...dealProps,
+            customer_name: { type: "string", readOnly: true, example: "Sunrise Hospital" },
+            closed_at: { type: "string", format: "date-time", nullable: true, description: "Set when the stage became won or lost" },
+            created_by: { type: "integer", nullable: true },
+            created_at: { type: "string", format: "date-time" },
+            updated_at: { type: "string", format: "date-time" },
+            sales_user_id: { type: "integer", nullable: true, readOnly: true, description: "The customer's owner (only with customers.view_all)" },
+            sales_user_name: { type: "string", nullable: true, readOnly: true, description: "The owner's name (only with customers.view_all)" },
+          },
+        },
+        DealInput: { type: "object", required: ["customer_id", "title", "amount"], properties: dealProps },
+        DealUpdate: { type: "object", properties: dealProps },
+        DealSummary: {
+          type: "object",
+          properties: {
+            open_count: { type: "integer", example: 3 },
+            open_amount: { type: "number", example: 420000 },
+            won_count: { type: "integer", example: 1 },
+            won_amount: { type: "number", example: 150000 },
+            lost_count: { type: "integer", example: 0 },
+            by_stage: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  stage: { type: "string", enum: DEAL_STAGES },
+                  count: { type: "integer" },
+                  amount: { type: "number" },
+                },
+              },
+            },
           },
         },
         ArticleInput: { type: "object", required: ["title", "content"], properties: articleProps },

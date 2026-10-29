@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api.js'
 import { useI18n } from '../i18n.jsx'
 import { useAuth } from '../auth.jsx'
+import { formatAmount } from '../deals.js'
 
 const MONTHS = 6
 
@@ -79,9 +80,10 @@ function CompletenessRow({ label, count, total }) {
 }
 
 export default function DashboardPage({ onNavigate, onChat }) {
-  const { t, locale } = useI18n()
+  const { t, locale, lang } = useI18n()
   const seesAll = useAuth().can('customers.view_all')
   const [customers, setCustomers] = useState([])
+  const [deals, setDeals] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -89,7 +91,9 @@ export default function DashboardPage({ onNavigate, onChat }) {
     setLoading(true)
     setError('')
     try {
-      setCustomers(await api.listCustomers())
+      const [list, summary] = await Promise.all([api.listCustomers(), api.getDealSummary()])
+      setCustomers(list)
+      setDeals(summary)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -158,6 +162,24 @@ export default function DashboardPage({ onNavigate, onChat }) {
             {!loading && <span className="muted small">{t.dashMissingHint}</span>}
           </div>
         )}
+      </div>
+
+      <div className="stats">
+        <button type="button" className="stat-card stat-link" onClick={() => onNavigate('deals')}>
+          <span className="stat-label">{t.openPipeline}</span>
+          <span className="stat-value">{value(formatAmount(deals?.open_amount, lang))}</span>
+          {!loading && deals && <span className="muted small">{t.openDealsCount(deals.open_count)}</span>}
+        </button>
+        <button type="button" className="stat-card stat-link" onClick={() => onNavigate('deals')}>
+          <span className="stat-label">{t.wonDeals}</span>
+          <span className="stat-value">{value(formatAmount(deals?.won_amount, lang))}</span>
+          {!loading && deals && <span className="muted small">{t.wonDealsCount(deals.won_count)}</span>}
+        </button>
+        <button type="button" className="stat-card stat-link" onClick={() => onNavigate('deals')}>
+          <span className="stat-label">{t.lostDeals}</span>
+          <span className="stat-value">{value(deals?.lost_count)}</span>
+          {!loading && deals && <span className="muted small">{t.lostDealsHint}</span>}
+        </button>
       </div>
 
       <div className="dash-grid">

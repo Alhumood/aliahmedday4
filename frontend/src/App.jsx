@@ -6,12 +6,14 @@ import AuthPage from './components/AuthPage.jsx'
 import CustomersPage from './components/CustomersPage.jsx'
 import ChatPage from './components/ChatPage.jsx'
 import DashboardPage from './components/DashboardPage.jsx'
+import DealsPage from './components/DealsPage.jsx'
 import KnowledgePage from './components/KnowledgePage.jsx'
 import UsersPage from './components/UsersPage.jsx'
 
 const NAV = [
   { id: 'dashboard', labelKey: 'navDashboard', icon: '📊' },
   { id: 'customers', labelKey: 'navCustomers', icon: '👥' },
+  { id: 'deals', labelKey: 'navDeals', icon: '💼' },
   { id: 'knowledge', labelKey: 'navKnowledge', icon: '📚' },
   { id: 'chat', labelKey: 'navChat', icon: '✨', permission: 'agent.use' },
   { id: 'users', labelKey: 'navUsers', icon: '🛡️', permission: 'users.manage' },
@@ -29,6 +31,7 @@ function MainLayout() {
   const [page, setPage] = useState('dashboard')
   const [chatPrompt, setChatPrompt] = useState(null)
   const [customerOwner, setCustomerOwner] = useState('')
+  const [dealCustomer, setDealCustomer] = useState(null)
   const [health, setHealth] = useState(null)
 
   useEffect(() => {
@@ -49,6 +52,11 @@ function MainLayout() {
     setPage('customers')
   }
 
+  function openDeals(customer = null) {
+    setDealCustomer(customer)
+    setPage('deals')
+  }
+
   return (
     <div className="layout">
       <aside className="sidebar">
@@ -64,6 +72,7 @@ function MainLayout() {
               onClick={() => {
                 setChatPrompt(null)
                 setCustomerOwner('')
+                setDealCustomer(null)
                 setPage(item.id)
               }}
             >
@@ -94,7 +103,12 @@ function MainLayout() {
       </aside>
       <main className="content">
         {page === 'dashboard' && <DashboardPage onNavigate={setPage} onChat={chat} />}
-        {page === 'customers' && <CustomersPage key={customerOwner} initialOwner={customerOwner} onChat={chat} />}
+        {page === 'customers' && (
+          <CustomersPage key={customerOwner} initialOwner={customerOwner} onChat={chat} onViewDeals={openDeals} />
+        )}
+        {page === 'deals' && (
+          <DealsPage key={dealCustomer?.customer_id ?? 'all'} initialCustomer={dealCustomer} onChat={chat} />
+        )}
         {page === 'knowledge' && <KnowledgePage onChat={chat} />}
         {page === 'chat' && chat && <ChatPage initialPrompt={chatPrompt} />}
         {page === 'users' && can('users.manage') && <UsersPage onViewCustomers={openCustomers} />}

@@ -54,6 +54,16 @@ export function saveBlob(blob, filename) {
   URL.revokeObjectURL(url)
 }
 
+function dealQuery({ customerId, stage, title, salesUserId }) {
+  const params = new URLSearchParams()
+  if (customerId) params.set('customer_id', customerId)
+  if (stage) params.set('stage', stage)
+  if (title) params.set('title', title)
+  if (salesUserId) params.set('sales_user_id', salesUserId)
+  const query = params.toString()
+  return query ? `?${query}` : ''
+}
+
 export const api = {
   baseUrl: BASE_URL,
   health: () => request('/api/health'),
@@ -81,6 +91,13 @@ export const api = {
   listCustomerOwners: () => request('/api/customers/owners'),
   assignCustomers: (customerIds, salesUserId) =>
     request('/api/customers/assign', { method: 'POST', body: { customer_ids: customerIds, sales_user_id: salesUserId } }),
+  // Deal filters: customerId, stage (a stage, 'open' or 'closed'), title, and salesUserId (customers.view_all only).
+  listDeals: (filters = {}) => request(`/api/deals${dealQuery(filters)}`),
+  getDealSummary: (filters = {}) => request(`/api/deals/summary${dealQuery(filters)}`),
+  getDeal: (id) => request(`/api/deals/${id}`),
+  createDeal: (body) => request('/api/deals', { method: 'POST', body }),
+  updateDeal: (id, body) => request(`/api/deals/${id}`, { method: 'PUT', body }),
+  deleteDeal: (id) => request(`/api/deals/${id}`, { method: 'DELETE' }),
   listUsers: () => request('/api/users'),
   setUserRole: (id, roleId) => request(`/api/users/${id}/role`, { method: 'PATCH', body: { role_id: roleId } }),
   createUser: (body) => request('/api/users', { method: 'POST', body }),

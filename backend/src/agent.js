@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { randomUUID } from "node:crypto";
 import * as db from "./db.js";
 import { can } from "./permissions.js";
+import { DEAL_STAGES, readDeal, readDealFilters } from "./deals.js";
 
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-5-5";
 const EFFORT = process.env.AGENT_EFFORT || "low";
@@ -27,7 +28,8 @@ When the user asks to add or change a customer, call the matching tool, then con
 If a name search returns several matches, list them and ask which one the user means before updating.
 For questions about policies, procedures, products or how-tos, search the knowledge bank first and answer from the articles you find, citing the article title. If nothing relevant is found, say so instead of guessing.
 Reply in the same language the user writes in (for example Arabic or English).
-Keep answers short. Present lists of customers as a Markdown table with id, name, email and phone${seesAll(user) ? " and owner" : ""}, with column headers in the reply language.`;
+Keep answers short. Present lists of customers as a Markdown table with id, name, email and phone${seesAll(user) ? " and owner" : ""}, with column headers in the reply language.
+Deals are sales opportunities with one customer. Their stages, in the usual order, are lead, qualified, proposal, then won or lost; any stage can be set at any time. You can see a customer's deals exactly when you can see the customer. Amounts are in Indian rupees: show them as ₹ with Indian digit grouping (for example ₹1,50,000). When the user asks to add a deal or change its stage, amount, title or expected close date, call the matching tool and confirm what was saved. You cannot delete deals; tell the user to do it in the app. Present lists of deals as a Markdown table with id, title, customer, amount, stage and expected close date, with column headers and stage names in the reply language.`;
 
 const tools = [
   {
@@ -85,6 +87,52 @@ const tools = [
     },
   },
   {
+    name: "search_deals",
+    description: "List deals, newest first. All filters are optional: a customer, a stage (or open / closed), and a partial title match.",
+    input_schema: {
+      type: "object",
+      properties: {
+        customer_id: { type: "integer" },
+        stage: { type: "string", enum: [...DEAL_STAGES, "open", "closed"], description: "open = lead, qualified, proposal; closed = won, lost" },
+        title: { type: "string", description: "Full or partial deal title" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "add_deal",
+    description: "Create a deal for a customer. The stage defaults to lead.",
+    input_schema: {
+      type: "object",
+      properties: {
+        customer_id: { type: "integer" },
+        title: { type: "string" },
+        amount: { type: "number", description: "In Indian rupees, 0 or more, at most 2 decimals" },
+        stage: { type: "string", enum: DEAL_STAGES },
+        expected_close_date: { type: "string", description: "YYYY-MM-DD" },
+      },
+      required: ["customer_id", "title", "amount"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "update_deal",
+    description: "Update a deal by deal_id: stage, title, amount, expected close date or customer. Omitted fields are left unchanged.",
+    input_schema: {
+      type: "object",
+      properties: {
+        deal_id: { type: "integer" },
+        customer_id: { type: "integer" },
+        title: { type: "string" },
+        amount: { type: "number" },
+        stage: { type: "string", enum: DEAL_STAGES },
+        expected_close_date: { type: ["string", "null"], description: "YYYY-MM-DD, or null to clear it" },
+      },
+      required: ["deal_id"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "search_knowledge",
     description: "Search the knowledge bank (policies, procedures, FAQs, product info) by keyword. Matches title, category and content. Use short keywords, not full sentences.",
     input_schema: {
@@ -124,6 +172,15 @@ async function executeTool(user, name, input) {
           phone: input.phone,
         })) ?? { error: "Customer not found" }
       );
+    case "search_deals":
+      return db.listDeals(user, readDealFilters(input));
+    case "add_deal":
+      return db.createDeal(user, readDeal(input));
+    case "update_deal": {
+      if (!Number.isInteger(input.deal_id)) throw new Error("deal_id must be an integer");
+      const { deal_id: dealId, ...fields } = input;
+      return (await db.updateDeal(user, dealId, readDeal(fields, { partial: true }))) ?? { error: "Deal not found" };
+    }
     case "search_knowledge":
       if (typeof input.query !== "string" || !input.query.trim()) throw new Error("query is required");
       return db.searchArticles(input.query.trim());

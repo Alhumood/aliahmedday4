@@ -300,3 +300,18 @@ tbody tr:hover { background: #fafbff; }
   .role-row { flex-direction: column; align-items: flex-start; }
   .role-actions { margin-inline-start: 0; }
 }
+
+/* Deals */
+.stage-badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 999px; white-space: nowrap; }
+.stage-lead { background: #f1f3f8; color: var(--muted); }
+.stage-qualified { background: #e0efff; color: #1d4ed8; }
+.stage-proposal { background: #fef3c7; color: #b45309; }
+.stage-won { background: #dcfce7; color: var(--success); }
+.stage-lost { background: var(--danger-soft); color: var(--danger); }
+.overdue { color: var(--danger); font-weight: 600; }
+td.amount { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.filter-bar { padding: 10px 16px; border-bottom: 1px solid var(--border); }
+.filter-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--primary-soft); color: var(--primary); border-radius: 999px; padding: 3px 6px 3px 12px; font-size: 13px; font-weight: 600; }
+.filter-chip button { border: none; background: none; color: inherit; font-size: 16px; line-height: 1; cursor: pointer; padding: 0 4px; }
+button.stat-link { font: inherit; color: inherit; text-align: start; cursor: pointer; }
+button.stat-link:hover { border-color: var(--primary); }
