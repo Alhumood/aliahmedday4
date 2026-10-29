@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api.js'
 import { useI18n } from '../i18n.jsx'
+import { useAuth } from '../auth.jsx'
 import Modal from './Modal.jsx'
 import CustomerForm from './CustomerForm.jsx'
 
@@ -10,8 +11,9 @@ const formatDate = (value, locale) =>
 const initials = (name) =>
   name.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join('')
 
-export default function CustomersPage({ onChat }) {
+export default function CustomersPage({ onChat, initialOwner = '' }) {
   const { t, locale } = useI18n()
+  const isAdmin = useAuth().user.role === 'admin'
   const [customers, setCustomers] = useState([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
@@ -19,23 +21,56 @@ export default function CustomersPage({ onChat }) {
   const [editing, setEditing] = useState(null) // null | 'new' | customer
   const [deleting, setDeleting] = useState(null)
   const [toast, setToast] = useState('')
+  // Admin only: owner filter ('' all, 'none' unassigned, or a user id), sales users, bulk selection.
+  const [owner, setOwner] = useState(initialOwner)
+  const [salesUsers, setSalesUsers] = useState([])
+  const [selected, setSelected] = useState(() => new Set())
+  const [assignTo, setAssignTo] = useState('')
 
   const load = useCallback(async (name) => {
     setLoading(true)
     setError('')
+    setSelected(new Set())
     try {
-      setCustomers(await api.listCustomers(name))
+      setCustomers(await api.listCustomers(name, isAdmin ? owner : ''))
     } catch (err) {
       setError(err.message)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [isAdmin, owner])
 
   useEffect(() => {
     const timer = setTimeout(() => load(search.trim()), 250)
     return () => clearTimeout(timer)
   }, [search, load])
+
+  useEffect(() => {
+    if (!isAdmin) return
+    api.listUsers()
+      .then((users) => setSalesUsers(users.filter((u) => u.role === 'sales')))
+      .catch((err) => setError(err.message))
+  }, [isAdmin])
+
+  function toggleSelected(id) {
+    const next = new Set(selected)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setSelected(next)
+  }
+
+  const allSelected = customers.length > 0 && selected.size === customers.length
+
+  async function handleAssign() {
+    try {
+      await api.assignCustomers([...selected], assignTo === 'none' ? null : Number(assignTo))
+      notify(t.customersAssigned(selected.size))
+      setAssignTo('')
+      load(search.trim())
+    } catch (err) {
+      setError(err.message)
+    }
+  }
 
   function notify(message) {
     setToast(message)
@@ -65,6 +100,8 @@ export default function CustomersPage({ onChat }) {
       setDeleting(null)
     }
   }
+
+  const columns = isAdmin ? 7 : 5
 
   return (
     <div className="page">
@@ -102,8 +139,32 @@ export default function CustomersPage({ onChat }) {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
+          {isAdmin && (
+            <select className="select" value={owner} onChange={(e) => setOwner(e.target.value)} aria-label={t.colOwner}>
+              <option value="">{t.allOwners}</option>
+              <option value="none">{t.unassigned}</option>
+              {salesUsers.map((u) => (
+                <option key={u.user_id} value={u.user_id}>{u.name}</option>
+              ))}
+            </select>
+          )}
           <button className="btn ghost" onClick={() => load(search.trim())}>{t.refresh}</button>
         </div>
+
+        {isAdmin && selected.size > 0 && (
+          <div className="bulk-bar">
+            <span>{t.selectedCount(selected.size)}</span>
+            <select className="select" value={assignTo} onChange={(e) => setAssignTo(e.target.value)} aria-label={t.assignTo}>
+              <option value="" disabled>{t.assignTo}</option>
+              <option value="none">{t.unassigned}</option>
+              {salesUsers.map((u) => (
+                <option key={u.user_id} value={u.user_id}>{u.name}</option>
+              ))}
+            </select>
+            <button className="btn primary small" disabled={!assignTo} onClick={handleAssign}>{t.assign}</button>
+            <button className="btn ghost small" onClick={() => setSelected(new Set())}>{t.cancel}</button>
+          </div>
+        )}
 
         {error && <div className="alert error">{error}</div>}
 
@@ -111,8 +172,19 @@ export default function CustomersPage({ onChat }) {
           <table>
             <thead>
               <tr>
+                {isAdmin && (
+                  <th className="check-col">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={() => setSelected(allSelected ? new Set() : new Set(customers.map((c) => c.customer_id)))}
+                      aria-label={t.selectAll}
+                    />
+                  </th>
+                )}
                 <th>{t.colId}</th>
                 <th>{t.colCustomer}</th>
+                {isAdmin && <th>{t.colOwner}</th>}
                 <th>{t.colPhone}</th>
                 <th>{t.colCreated}</th>
                 <th className="end">{t.colActions}</th>
@@ -120,12 +192,22 @@ export default function CustomersPage({ onChat }) {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={5} className="empty">{t.loading}</td></tr>
+                <tr><td colSpan={columns} className="empty">{t.loading}</td></tr>
               ) : customers.length === 0 ? (
-                <tr><td colSpan={5} className="empty">{t.noCustomers}</td></tr>
+                <tr><td colSpan={columns} className="empty">{t.noCustomers}</td></tr>
               ) : (
                 customers.map((c) => (
                   <tr key={c.customer_id}>
+                    {isAdmin && (
+                      <td className="check-col">
+                        <input
+                          type="checkbox"
+                          checked={selected.has(c.customer_id)}
+                          onChange={() => toggleSelected(c.customer_id)}
+                          aria-label={c.name}
+                        />
+                      </td>
+                    )}
                     <td className="muted">#{c.customer_id}</td>
                     <td>
                       <div className="person">
@@ -136,6 +218,9 @@ export default function CustomersPage({ onChat }) {
                         </div>
                       </div>
                     </td>
+                    {isAdmin && (
+                      <td>{c.sales_user_name ?? <span className="tag muted">{t.unassigned}</span>}</td>
+                    )}
                     <td>{c.phone ? <bdi>{c.phone}</bdi> : <span className="muted">—</span>}</td>
                     <td className="muted">{formatDate(c.created_at, locale)}</td>
                     <td className="end">
@@ -155,6 +240,7 @@ export default function CustomersPage({ onChat }) {
         <Modal title={editing === 'new' ? t.addCustomer.replace('+ ', '') : t.editCustomer} onClose={() => setEditing(null)}>
           <CustomerForm
             initial={editing === 'new' ? null : editing}
+            salesUsers={isAdmin ? salesUsers : null}
             onSubmit={handleSave}
             onCancel={() => setEditing(null)}
           />

@@ -61,65 +61,161 @@ export async function getUserById(id) {
   return rows[0] ?? null;
 }
 
-// Every customer query is scoped to the owning sales user, so other users' rows are never visible.
-const COLUMNS = "customer_id, name, email, phone, sales_user_id, created_at";
+const USER_WITH_COUNT = `
+  SELECT u.user_id, u.name, u.email, u.role, u.created_at, count(c.customer_id)::int AS customer_count
+  FROM app_user u LEFT JOIN customer c ON c.sales_user_id = u.user_id`;
 
-export async function listCustomers(userId) {
+export async function listUsersWithCounts() {
   await ensureAuthSchema();
+  const { rows } = await pool.query(`${USER_WITH_COUNT} GROUP BY u.user_id ORDER BY u.user_id`);
+  return rows;
+}
+
+export async function getUserWithCount(id) {
+  await ensureAuthSchema();
+  const { rows } = await pool.query(`${USER_WITH_COUNT} WHERE u.user_id = $1 GROUP BY u.user_id`, [id]);
+  return rows[0] ?? null;
+}
+
+export async function setUserRole(id, role) {
+  await ensureAuthSchema();
+  const { rows } = await pool.query(`UPDATE app_user SET role = $2 WHERE user_id = $1 RETURNING ${USER_COLUMNS}`, [id, role]);
+  return rows[0] ?? null;
+}
+
+export async function countCustomersOwnedBy(userId) {
+  await ensureAuthSchema();
+  const { rows } = await pool.query("SELECT count(*)::int AS n FROM customer WHERE sales_user_id = $1", [userId]);
+  return rows[0].n;
+}
+
+// Only sales users can own customers.
+export async function isSalesUser(id) {
+  await ensureAuthSchema();
+  const { rows } = await pool.query("SELECT 1 FROM app_user WHERE user_id = $1 AND role = 'sales'", [id]);
+  return rows.length > 0;
+}
+
+// Customer access depends on the caller's role. Sales users are always limited to their own rows;
+// admins reach every row, may filter by owner, and also get the owner's name.
+const isAdmin = (user) => user.role === "admin";
+
+function customerSelect(user, source) {
+  const ownerName = isAdmin(user) ? ", u.name AS sales_user_name" : "";
+  return `SELECT c.customer_id, c.name, c.email, c.phone, c.sales_user_id, c.created_at${ownerName}
+          FROM ${source} c LEFT JOIN app_user u ON u.user_id = c.sales_user_id`;
+}
+
+// Returns the SQL condition limiting which customers `user` can reach, pushing its values onto params.
+// salesUserId is an admin-only filter: an id, "none" for unassigned, or undefined for all.
+function ownerScope(user, params, salesUserId) {
+  if (!isAdmin(user)) {
+    params.push(user.user_id);
+    return `c.sales_user_id = $${params.length}`;
+  }
+  if (salesUserId === "none") return "c.sales_user_id IS NULL";
+  if (salesUserId !== undefined) {
+    params.push(salesUserId);
+    return `c.sales_user_id = $${params.length}`;
+  }
+  return "TRUE";
+}
+
+export async function listCustomers(user, { name, salesUserId } = {}) {
+  await ensureAuthSchema();
+  const params = [];
+  const conditions = [ownerScope(user, params, salesUserId)];
+  if (name) {
+    params.push(`%${name}%`);
+    conditions.push(`c.name ILIKE $${params.length}`);
+  }
   const { rows } = await pool.query(
-    `SELECT ${COLUMNS} FROM customer WHERE sales_user_id = $1 ORDER BY customer_id`,
-    [userId],
+    `${customerSelect(user, "customer")} WHERE ${conditions.join(" AND ")} ORDER BY c.customer_id`,
+    params,
   );
   return rows;
 }
 
-export async function getCustomerById(userId, id) {
+export async function getCustomerById(user, id) {
   await ensureAuthSchema();
+  const params = [id];
   const { rows } = await pool.query(
-    `SELECT ${COLUMNS} FROM customer WHERE customer_id = $1 AND sales_user_id = $2`,
-    [id, userId],
+    `${customerSelect(user, "customer")} WHERE c.customer_id = $1 AND ${ownerScope(user, params)}`,
+    params,
   );
   return rows[0] ?? null;
 }
 
-export async function searchCustomersByName(userId, name) {
+// salesUserId is only honoured for admins (null = unassigned); sales users always own what they create.
+export async function createCustomer(user, { name, email = null, phone = null, salesUserId = null }) {
   await ensureAuthSchema();
+  const owner = isAdmin(user) ? salesUserId : user.user_id;
   const { rows } = await pool.query(
-    `SELECT ${COLUMNS} FROM customer WHERE name ILIKE $1 AND sales_user_id = $2 ORDER BY customer_id`,
-    [`%${name}%`, userId],
-  );
-  return rows;
-}
-
-export async function createCustomer(userId, { name, email = null, phone = null }) {
-  await ensureAuthSchema();
-  const { rows } = await pool.query(
-    `INSERT INTO customer (name, email, phone, sales_user_id) VALUES ($1, $2, $3, $4) RETURNING ${COLUMNS}`,
-    [name, email, phone, userId],
+    `WITH changed AS (
+       INSERT INTO customer (name, email, phone, sales_user_id) VALUES ($1, $2, $3, $4) RETURNING *
+     ) ${customerSelect(user, "changed")}`,
+    [name, email, phone, owner],
   );
   return rows[0];
 }
 
-export async function updateCustomer(userId, id, { name, email, phone }) {
+// salesUserId: undefined leaves the owner unchanged, null unassigns; only honoured for admins.
+export async function updateCustomer(user, id, { name, email, phone, salesUserId }) {
   await ensureAuthSchema();
+  const params = [id, name ?? null, email ?? null, phone ?? null];
+  const sets = ["name = COALESCE($2, name)", "email = COALESCE($3, email)", "phone = COALESCE($4, phone)"];
+  if (isAdmin(user) && salesUserId !== undefined) {
+    params.push(salesUserId);
+    sets.push(`sales_user_id = $${params.length}`);
+  }
+  const scope = ownerScope(user, params);
   const { rows } = await pool.query(
-    `UPDATE customer SET
-       name = COALESCE($3, name),
-       email = COALESCE($4, email),
-       phone = COALESCE($5, phone)
-     WHERE customer_id = $1 AND sales_user_id = $2 RETURNING ${COLUMNS}`,
-    [id, userId, name ?? null, email ?? null, phone ?? null],
+    `WITH changed AS (
+       UPDATE customer c SET ${sets.join(", ")} WHERE c.customer_id = $1 AND ${scope} RETURNING c.*
+     ) ${customerSelect(user, "changed")}`,
+    params,
   );
   return rows[0] ?? null;
 }
 
-export async function deleteCustomer(userId, id) {
+export async function deleteCustomer(user, id) {
   await ensureAuthSchema();
+  const params = [id];
+  const scope = ownerScope(user, params);
   const { rows } = await pool.query(
-    `DELETE FROM customer WHERE customer_id = $1 AND sales_user_id = $2 RETURNING ${COLUMNS}`,
-    [id, userId],
+    `WITH changed AS (
+       DELETE FROM customer c WHERE c.customer_id = $1 AND ${scope} RETURNING c.*
+     ) ${customerSelect(user, "changed")}`,
+    params,
   );
   return rows[0] ?? null;
+}
+
+// Admin-only bulk (re)assignment; all-or-nothing, so one unknown id changes nothing.
+export async function assignCustomers(user, customerIds, salesUserId) {
+  await ensureAuthSchema();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      `WITH changed AS (
+         UPDATE customer SET sales_user_id = $2 WHERE customer_id = ANY($1::int[]) RETURNING *
+       ) ${customerSelect(user, "changed")} ORDER BY c.customer_id`,
+      [customerIds, salesUserId],
+    );
+    if (rows.length !== new Set(customerIds).size) {
+      const err = new Error("One or more customer_ids do not exist");
+      err.status = 400;
+      throw err;
+    }
+    await client.query("COMMIT");
+    return rows;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 const KNOWLEDGE_COLUMNS = "article_id, title, category, content, created_at, updated_at";

@@ -34,11 +34,21 @@ export const api = {
   register: (body) => request('/api/auth/register', { method: 'POST', body }),
   login: (body) => request('/api/auth/login', { method: 'POST', body }),
   me: () => request('/api/auth/me'),
-  listCustomers: (name) =>
-    request(`/api/customers${name ? `?name=${encodeURIComponent(name)}` : ''}`),
+  // salesUserId (admin only): a user id, 'none' for unassigned, or empty for all.
+  listCustomers: (name, salesUserId) => {
+    const params = new URLSearchParams()
+    if (name) params.set('name', name)
+    if (salesUserId) params.set('sales_user_id', salesUserId)
+    const query = params.toString()
+    return request(`/api/customers${query ? `?${query}` : ''}`)
+  },
   createCustomer: (body) => request('/api/customers', { method: 'POST', body }),
   updateCustomer: (id, body) => request(`/api/customers/${id}`, { method: 'PUT', body }),
   deleteCustomer: (id) => request(`/api/customers/${id}`, { method: 'DELETE' }),
+  assignCustomers: (customerIds, salesUserId) =>
+    request('/api/customers/assign', { method: 'POST', body: { customer_ids: customerIds, sales_user_id: salesUserId } }),
+  listUsers: () => request('/api/users'),
+  setUserRole: (id, role) => request(`/api/users/${id}/role`, { method: 'PATCH', body: { role } }),
   listArticles: (q) =>
     request(`/api/knowledge${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   createArticle: (body) => request('/api/knowledge', { method: 'POST', body }),

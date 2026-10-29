@@ -5,14 +5,20 @@ import * as db from "./db.js";
 const MODEL = "claude-opus-5-5";
 const MAX_TOOL_ROUNDS = 8;
 
-const SYSTEM_PROMPT = `You are a customer-data assistant for an internal CRM.
-You only have access to the customers assigned to the signed-in sales person; if a customer is not found, say so and do not speculate about other users' data.
+const ACCESS_RULES = {
+  sales: "You only have access to the customers assigned to the signed-in sales person; if a customer is not found, say so and do not speculate about other users' data.",
+  admin: "You are assisting an administrator who can see every customer; mention the owning sales person (sales_user_name) when listing customers, and 'Unassigned' when there is none. Customers you add are created unassigned, and you cannot change a customer's owner.",
+};
+
+// Rebuilt on every call from the current role, so a role change applies to existing conversations.
+const systemPrompt = (user) => `You are a customer-data assistant for an internal CRM.
+${ACCESS_RULES[user.role] ?? ACCESS_RULES.sales}
 Answer questions about customers using the provided tools; never invent customer records.
 When the user asks to add or change a customer, call the matching tool, then confirm what was saved.
 If a name search returns several matches, list them and ask which one the user means before updating.
 For questions about policies, procedures, products or how-tos, search the knowledge bank first and answer from the articles you find, citing the article title. If nothing relevant is found, say so instead of guessing.
 Reply in the same language the user writes in (for example Arabic or English).
-Keep answers short. Present lists of customers as a Markdown table with id, name, email and phone, with column headers in the reply language.`;
+Keep answers short. Present lists of customers as a Markdown table with id, name, email and phone${user.role === "admin" ? " and owner" : ""}, with column headers in the reply language.`;
 
 const tools = [
   {
@@ -86,24 +92,24 @@ const tools = [
   },
 ];
 
-// userId always comes from the authenticated request, never from the model's tool input.
-async function executeTool(userId, name, input) {
+// user (id and role) always comes from the authenticated request, never from the model's tool input.
+async function executeTool(user, name, input) {
   switch (name) {
     case "get_all_customers":
-      return db.listCustomers(userId);
+      return db.listCustomers(user);
     case "get_customer_by_name":
       if (typeof input.name !== "string" || !input.name.trim()) throw new Error("name is required");
-      return db.searchCustomersByName(userId, input.name.trim());
+      return db.listCustomers(user, { name: input.name.trim() });
     case "get_customer_by_id":
       if (!Number.isInteger(input.customer_id)) throw new Error("customer_id must be an integer");
-      return (await db.getCustomerById(userId, input.customer_id)) ?? { error: "Customer not found" };
+      return (await db.getCustomerById(user, input.customer_id)) ?? { error: "Customer not found" };
     case "add_customer":
       if (typeof input.name !== "string" || !input.name.trim()) throw new Error("name is required");
-      return db.createCustomer(userId, { name: input.name.trim(), email: input.email, phone: input.phone });
+      return db.createCustomer(user, { name: input.name.trim(), email: input.email, phone: input.phone });
     case "update_customer":
       if (!Number.isInteger(input.customer_id)) throw new Error("customer_id must be an integer");
       return (
-        (await db.updateCustomer(userId, input.customer_id, {
+        (await db.updateCustomer(user, input.customer_id, {
           name: input.name,
           email: input.email,
           phone: input.phone,
@@ -149,7 +155,7 @@ export async function chat(user, message, conversationId) {
     const response = await anthropic.beta.messages.create({
       model: MODEL,
       max_tokens: 16000,
-      system: SYSTEM_PROMPT,
+      system: systemPrompt(user),
       tools,
       messages,
       output_config: { effort: "low" },
@@ -177,7 +183,7 @@ export async function chat(user, message, conversationId) {
       toolUses.map(async (block) => {
         toolCalls.push({ name: block.name, input: block.input });
         try {
-          const result = await executeTool(user.user_id, block.name, block.input ?? {});
+          const result = await executeTool(user, block.name, block.input ?? {});
           return { type: "tool_result", tool_use_id: block.id, content: JSON.stringify(result) };
         } catch (err) {
           return { type: "tool_result", tool_use_id: block.id, content: err.message, is_error: true };

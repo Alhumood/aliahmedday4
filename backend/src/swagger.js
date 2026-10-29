@@ -7,6 +7,15 @@ const customerProps = {
   phone: { type: "string", nullable: true, example: "0501234567" },
 };
 
+const adminOwnerProp = {
+  sales_user_id: {
+    type: "integer",
+    nullable: true,
+    example: 2,
+    description: "Admin only, ignored for sales users. A sales user's id, or null for unassigned.",
+  },
+};
+
 const articleProps = {
   title: { type: "string", example: "Refund policy" },
   category: { type: "string", nullable: true, example: "Policies" },
@@ -27,6 +36,9 @@ export const swaggerSpec = swaggerJsdoc({
         "",
         "**Testing here:** call `POST /api/auth/register` (or `/login`), copy the `token` from the response,",
         "click **Authorize**, paste it, then try the Customers and Agent endpoints.",
+        "",
+        "**Admins** see every customer (with `sales_user_name`), can assign customers to sales users and manage roles",
+        "under **Users**. Make the first admin locally with `npm run make-admin -- <email>` after registering, then log in again.",
       ].join("\n"),
     },
     servers: [{ url: "/", description: "Current host" }],
@@ -36,6 +48,14 @@ export const swaggerSpec = swaggerJsdoc({
         bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" },
       },
       responses: {
+        Forbidden: {
+          description: "Admin access required",
+          content: {
+            "application/json": {
+              schema: { type: "object", properties: { error: { type: "string", example: "Admin access required" } } },
+            },
+          },
+        },
         Unauthorized: {
           description: "Missing, invalid or expired token",
           content: {
@@ -69,8 +89,27 @@ export const swaggerSpec = swaggerJsdoc({
             user_id: { type: "integer", example: 1 },
             name: { type: "string", example: "Sara Sales" },
             email: { type: "string", example: "sara@example.com" },
-            role: { type: "string", example: "sales" },
+            role: { type: "string", enum: ["sales", "admin"], example: "sales" },
             created_at: { type: "string", format: "date-time" },
+          },
+        },
+        UserWithCount: {
+          allOf: [
+            { $ref: "#/components/schemas/User" },
+            { type: "object", properties: { customer_count: { type: "integer", example: 3 } } },
+          ],
+        },
+        RoleUpdate: {
+          type: "object",
+          required: ["role"],
+          properties: { role: { type: "string", enum: ["sales", "admin"], example: "admin" } },
+        },
+        AssignInput: {
+          type: "object",
+          required: ["customer_ids", "sales_user_id"],
+          properties: {
+            customer_ids: { type: "array", items: { type: "integer" }, example: [1, 2, 3] },
+            sales_user_id: { type: "integer", nullable: true, example: 2, description: "A sales user's id, or null to unassign" },
           },
         },
         AuthResponse: {
@@ -85,12 +124,24 @@ export const swaggerSpec = swaggerJsdoc({
           properties: {
             customer_id: { type: "integer", example: 1 },
             ...customerProps,
-            sales_user_id: { type: "integer", readOnly: true, example: 1, description: "Owning sales user; set from the token" },
+            sales_user_id: {
+              type: "integer",
+              nullable: true,
+              example: 1,
+              description: "Owning sales user. Set from the token for sales users; admins can set it (null = unassigned).",
+            },
+            sales_user_name: { type: "string", nullable: true, readOnly: true, description: "Owner's name (admin responses only)" },
             created_at: { type: "string", format: "date-time" },
           },
         },
         CustomerInput: { type: "object", required: ["name"], properties: customerProps },
         CustomerUpdate: { type: "object", properties: customerProps },
+        AdminCustomerInput: {
+          type: "object",
+          required: ["name"],
+          properties: { ...customerProps, ...adminOwnerProp },
+        },
+        AdminCustomerUpdate: { type: "object", properties: { ...customerProps, ...adminOwnerProp } },
         Article: {
           type: "object",
           properties: {

@@ -7,12 +7,14 @@ import CustomersPage from './components/CustomersPage.jsx'
 import ChatPage from './components/ChatPage.jsx'
 import DashboardPage from './components/DashboardPage.jsx'
 import KnowledgePage from './components/KnowledgePage.jsx'
+import UsersPage from './components/UsersPage.jsx'
 
 const NAV = [
   { id: 'dashboard', labelKey: 'navDashboard', icon: '📊' },
   { id: 'customers', labelKey: 'navCustomers', icon: '👥' },
   { id: 'knowledge', labelKey: 'navKnowledge', icon: '📚' },
   { id: 'chat', labelKey: 'navChat', icon: '✨' },
+  { id: 'users', labelKey: 'navUsers', icon: '🛡️', adminOnly: true },
 ]
 
 export default function App() {
@@ -26,6 +28,7 @@ function MainLayout() {
   const { user, logout } = useAuth()
   const [page, setPage] = useState('dashboard')
   const [chatPrompt, setChatPrompt] = useState(null)
+  const [customerOwner, setCustomerOwner] = useState('')
   const [health, setHealth] = useState(null)
 
   useEffect(() => {
@@ -33,10 +36,16 @@ function MainLayout() {
   }, [])
 
   const online = health?.status === 'ok'
+  const isAdmin = user.role === 'admin'
 
   function openChat(prompt = null) {
     setChatPrompt(prompt)
     setPage('chat')
+  }
+
+  function openCustomers(owner = '') {
+    setCustomerOwner(owner)
+    setPage('customers')
   }
 
   return (
@@ -47,12 +56,13 @@ function MainLayout() {
           <span>{t.appName}</span>
         </div>
         <nav>
-          {NAV.map((item) => (
+          {NAV.filter((item) => isAdmin || !item.adminOnly).map((item) => (
             <button
               key={item.id}
               className={`nav-item ${page === item.id ? 'active' : ''}`}
               onClick={() => {
                 setChatPrompt(null)
+                setCustomerOwner('')
                 setPage(item.id)
               }}
             >
@@ -83,9 +93,10 @@ function MainLayout() {
       </aside>
       <main className="content">
         {page === 'dashboard' && <DashboardPage onNavigate={setPage} onChat={openChat} />}
-        {page === 'customers' && <CustomersPage onChat={openChat} />}
+        {page === 'customers' && <CustomersPage key={customerOwner} initialOwner={customerOwner} onChat={openChat} />}
         {page === 'knowledge' && <KnowledgePage onChat={openChat} />}
         {page === 'chat' && <ChatPage initialPrompt={chatPrompt} />}
+        {page === 'users' && isAdmin && <UsersPage onViewCustomers={openCustomers} />}
       </main>
     </div>
   )

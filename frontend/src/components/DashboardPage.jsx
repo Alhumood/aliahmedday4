@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api.js'
 import { useI18n } from '../i18n.jsx'
+import { useAuth } from '../auth.jsx'
 
 const MONTHS = 6
 
@@ -79,6 +80,7 @@ function CompletenessRow({ label, count, total }) {
 
 export default function DashboardPage({ onNavigate, onChat }) {
   const { t, locale } = useI18n()
+  const isAdmin = useAuth().user.role === 'admin'
   const [customers, setCustomers] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -103,6 +105,7 @@ export default function DashboardPage({ onNavigate, onChat }) {
   const withEmail = customers.filter((c) => c.email).length
   const withPhone = customers.filter((c) => c.phone).length
   const complete = customers.filter((c) => c.email && c.phone).length
+  const unassigned = customers.filter((c) => !c.sales_user_id).length
   const monthly = monthlyCounts(customers, locale)
   const thisMonth = monthly[monthly.length - 1].count
   const lastMonth = monthly[monthly.length - 2].count
@@ -142,11 +145,19 @@ export default function DashboardPage({ onNavigate, onChat }) {
           <span className="stat-value">{value(complete)}</span>
           {!loading && <span className="muted small">{t.dashCompleteHint}</span>}
         </div>
-        <div className="stat-card">
-          <span className="stat-label">{t.dashMissing}</span>
-          <span className="stat-value">{value(total - complete)}</span>
-          {!loading && <span className="muted small">{t.dashMissingHint}</span>}
-        </div>
+        {isAdmin ? (
+          <div className="stat-card">
+            <span className="stat-label">{t.dashUnassigned}</span>
+            <span className="stat-value">{value(unassigned)}</span>
+            {!loading && <span className="muted small">{t.dashUnassignedHint}</span>}
+          </div>
+        ) : (
+          <div className="stat-card">
+            <span className="stat-label">{t.dashMissing}</span>
+            <span className="stat-value">{value(total - complete)}</span>
+            {!loading && <span className="muted small">{t.dashMissingHint}</span>}
+          </div>
+        )}
       </div>
 
       <div className="dash-grid">
@@ -166,6 +177,7 @@ export default function DashboardPage({ onNavigate, onChat }) {
               <CompletenessRow label={t.withEmail} count={withEmail} total={total} />
               <CompletenessRow label={t.withPhone} count={withPhone} total={total} />
               <CompletenessRow label={t.dashComplete} count={complete} total={total} />
+              {isAdmin && <CompletenessRow label={t.dashMissing} count={total - complete} total={total} />}
             </div>
           )}
         </section>

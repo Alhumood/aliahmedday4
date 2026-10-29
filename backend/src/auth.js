@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { getUserById } from "./db.js";
 
 const TOKEN_LIFETIME = "8h";
 
@@ -22,23 +23,31 @@ export function signToken(user) {
 }
 
 // Sets req.user from the Bearer token; responds 401 when it is missing, invalid or expired.
-export function requireAuth(req, res, next) {
+// The user (and so the role) is reloaded from the database, so role changes apply immediately.
+export async function requireAuth(req, res, next) {
   const [scheme, token] = (req.headers.authorization ?? "").split(" ");
   if (scheme !== "Bearer" || !token) {
     return res.status(401).json({ error: "Authentication required" });
   }
-  let secret;
+  let payload;
   try {
-    secret = getSecret();
+    payload = jwt.verify(token, getSecret());
   } catch (err) {
-    return next(err);
+    if (err.status) return next(err);
+    const error = err.name === "TokenExpiredError" ? "Session expired, please log in again" : "Authentication required";
+    return res.status(401).json({ error });
   }
   try {
-    const payload = jwt.verify(token, secret);
-    req.user = { user_id: Number(payload.sub), email: payload.email, role: payload.role };
+    const user = await getUserById(Number(payload.sub));
+    if (!user) return res.status(401).json({ error: "Authentication required" });
+    req.user = { user_id: user.user_id, email: user.email, role: user.role };
     next();
   } catch (err) {
-    const error = err.name === "TokenExpiredError" ? "Session expired, please log in again" : "Authentication required";
-    res.status(401).json({ error });
+    next(err);
   }
+}
+
+export function requireAdmin(req, res, next) {
+  if (req.user?.role !== "admin") return res.status(403).json({ error: "Admin access required" });
+  next();
 }

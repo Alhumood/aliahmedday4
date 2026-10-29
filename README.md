@@ -36,12 +36,23 @@ CORS allows `FRONTEND_ORIGIN` (default `http://localhost:5173`).
 - Each customer belongs to one sales user (`customer.sales_user_id`). Users only see and change their own customers, and another user's customer returns `404`. The agent follows the same rule.
 - The knowledge bank is shared by all logged-in users.
 - **Testing in Swagger:** call register or login, copy the `token`, click **Authorize**, paste it, then try the other endpoints.
-- The `app_user` table and the `sales_user_id` column are created on first use. Customers that existed before have no owner and stay hidden until you assign them, for example:
+- The `app_user` table and the `sales_user_id` column are created on first use. Customers that existed before have no owner, and only an admin can see them until they are assigned.
 
-  ```sql
-  UPDATE customer SET sales_user_id = (SELECT user_id FROM app_user WHERE email = 'you@example.com')
-  WHERE sales_user_id IS NULL;
+### Admin role
+
+- Admins see and manage **every** customer, with the owner's name (`sales_user_name`). They can filter with `GET /api/customers?sales_user_id=<id>` or `?sales_user_id=none` for unassigned customers.
+- Admins can set or change a customer's owner with `sales_user_id` on POST and PUT (`null` unassigns it), or assign many at once with `POST /api/customers/assign` `{ customer_ids: [...], sales_user_id }`. Only sales users can own customers.
+- `GET /api/users` lists users with their customer counts. `PATCH /api/users/{id}/role` `{ role: "sales" | "admin" }` changes a role. An admin can't change their own role, and a user who still owns customers can't be made an admin.
+- Sales users get `403` on these endpoints, and any `sales_user_id` they send is ignored.
+- The role is checked in the database on every request, so a role change applies immediately, even to existing tokens.
+- **Making the first admin:** register normally, then run locally:
+
+  ```bash
+  cd backend
+  npm run make-admin -- you@example.com
   ```
+
+- In the UI, admins get a **Users** page, an **Owner** column and filter, bulk **Assign to…** on Customers, an **Owner** field in the customer form, and an "Unassigned customers" card on the Dashboard.
 
 ## Frontend
 
