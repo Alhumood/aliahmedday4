@@ -1,7 +1,7 @@
-# Plan 03: Admin Adds, Edits and Deletes Users, and Manages Job Titles
+# Plan 03: Admin Adds, Edits and Deletes Users, and Manages Roles
 
 **Spec:** [`_specs/03_spec_admin_user_crud_job_titles.md`](../_specs/03_spec_admin_user_crud_job_titles.md) (approved 2026-10-29, defaults from section 10)
-**Status:** Approved (2026-10-29)
+**Status:** Approved (2026-10-29). Sections 0–9 built the job-title version. **Section 10 is the plan for the spec 03 revision (section 11 of the spec): job titles become roles with permissions.**
 
 ## 0. Before starting
 
@@ -143,3 +143,74 @@ There is no test suite, so verify by hand against spec section 9. Every test use
 - **Deleting users:** the `customer.sales_user_id` foreign key has no `ON DELETE` rule, so a user who owns customers can't be deleted until the customers are moved. The transaction in 2.4 does exactly that, inside the same transaction.
 - **Admins handling passwords** (spec Q3): passwords are only ever stored hashed and are never returned by the API. The edit form never shows the current password.
 - **Admin count:** an admin can't delete or demote themselves, so there is always at least one admin. Two admins could still demote each other. That is accepted, as in spec 02.
+
+## 10. Revision: roles with permissions (spec section 11)
+
+### 10.0 Before starting
+
+Commit the revised spec and this plan so the implementation starts from a clean tree. No new dependencies or env vars.
+
+### 10.1 Backend: `src/permissions.js` (new)
+
+- `PERMISSIONS`: the eight keys with an English description each, in display order.
+- `SYSTEM_ROLES = { admin: { name: 'Admin', permissions }, sales: { name: 'Sales', permissions } }` from spec 11.3.
+- `can(user, key)`, used by routes, `db.js`, `export.js` and the agent.
+
+### 10.2 Backend: schema and migration (`db.js`)
+
+`ensureAuthSchema()` stays one cached promise and one multi-statement query (Postgres runs it as one transaction):
+1. `CREATE TABLE IF NOT EXISTS role (...)` and the `lower(name)` unique index.
+2. `CREATE TABLE IF NOT EXISTS app_user` now without the old `role` column; `ALTER TABLE app_user ADD COLUMN IF NOT EXISTS role_id INTEGER REFERENCES role(role_id)`. The customer owner column and index stay.
+3. A `DO` block that runs only when the built-in Admin role doesn't exist yet: insert Admin and Sales; if the `job_title` table exists, insert each title as a role with the Sales permissions (`ON CONFLICT DO NOTHING`) and point its sales users at it. The statements that touch the old columns use `EXECUTE`, so a fresh database without them still works.
+4. On every start: users with `role_id IS NULL` get the role matching their old `role` column (when it exists), else Sales.
+
+The old columns and the `job_title` table are not dropped (spec 11.4).
+
+### 10.3 Backend: queries (`db.js`)
+
+- `userSelect()` joins `role` and returns `role_id`, `r.name AS role`, `r.system_key AS role_key`, `r.permissions`. Every user read already goes through it.
+- `createUser({ ..., roleId })` defaults to the Sales role. `updateUser` maps `roleId` → `role_id`. `setUserRole(id, roleId)`.
+- `canOwnCustomers(id)` replaces `isSalesUser`. `listCustomerOwners()` for the new endpoint.
+- Roles: `listRoles()` (with `user_count`), `getRole(id)`, `createRole`, `updateRole` (only the fields sent), `deleteRole`, `countRoleUsers`, `countCustomersOwnedByRole`, `getSystemRole(key)`. Duplicate names → `409` through `withConflict()`.
+- Customer queries: `isAdmin(user)` becomes `can(user, 'customers.view_all')`.
+- Job-title functions are removed.
+
+### 10.4 Backend: auth and routes
+
+- `auth.js`: `requireAuth` adds `role_id`, `role`, `permissions` to `req.user`. `requirePermission(key)` replaces `requireAdmin`. The token payload drops `role`.
+- `routes/roles.js` (new, replaces `jobTitles.js`): the five endpoints from spec 11.6, with the rules from 11.5 (Admin locked, system roles not deletable, `view_all` or `own` required, `assign` needs `view_all`, own `users.manage`, owned customers, role in use).
+- `routes/users.js`: `requirePermission('users.manage')`; `role_id` replaces `role` / `job_title_id` in `readUserFields`; the own-role and owns-customers checks use the target role's permissions; `reassign_to` uses `canOwnCustomers`.
+- `routes/customers.js`: `isAdmin(req)` → `can(req.user, 'customers.view_all')`; `GET /owners` (before `/:id`); permission checks on assign, delete and export.
+- `routes/knowledge.js`: `requirePermission('knowledge.manage')` on POST, PUT, DELETE.
+- `app.js`: mount `/api/roles`, drop `/api/job-titles`, and put `requirePermission('agent.use')` on `/api/agent`.
+- `export.js`: the Owner column depends on `customers.view_all`.
+- `agent.js`: `ACCESS_RULES` keyed by `customers.view_all`.
+- `scripts/make-admin.js`: assigns the built-in Admin role.
+
+### 10.5 Backend: Swagger
+
+`swagger.js`: `Role`, `RoleInput`, `Permission` replace `JobTitle` / `JobTitleInput`; `User` gets `role_id`, `role`, `role_key`, `permissions`; `UserCreate` / `UserUpdate` / `RoleUpdate` take `role_id`; the `Forbidden` response says "Permission required"; the description mentions roles. JSDoc for every changed route, including `403`s.
+
+### 10.6 Frontend
+
+1. `api.js`: `listRoles`, `listPermissions`, `createRole`, `updateRole`, `deleteRole`, `listCustomerOwners`; `setUserRole(id, roleId)`; job-title calls removed.
+2. `auth.jsx`: `can(key)` on the context value.
+3. `App.jsx`: nav items carry a `permission`; the Users page needs `users.manage`; `onChat` is only passed when the user has `agent.use`, and pages hide AI buttons when it is missing; the sidebar shows the role name through a `roleName()` helper in `i18n.jsx` (translates built-in roles that keep their default name).
+4. `CustomersPage.jsx`, `DashboardPage.jsx`, `KnowledgePage.jsx`: permission checks from spec 11.8; owners come from `api.listCustomerOwners()`.
+5. `UsersPage.jsx` / `UserForm.jsx`: role dropdowns from `listRoles()`, job title removed, new stat cards.
+6. `RolesCard.jsx` + `RoleForm.jsx` (new, replace `JobTitlesCard.jsx`): role list with permission tags, add/edit modal with checkboxes, delete confirm.
+7. `i18n.jsx`: remove job-title keys, add role and permission keys in `en` and `ar`.
+8. `index.css`: rename the job-title styles to role styles and add permission tags/checkbox grid.
+
+### 10.7 Docs
+
+`README.md` and `CLAUDE.md`: roles and permissions replace job titles and the fixed sales/admin roles.
+
+### 10.8 Verification
+
+No test suite, so by hand against spec 11.9, using temporary users and roles that are deleted afterwards. **Ali's account and data are not changed** apart from the migration itself.
+1. Restart the backend, then check that Ali is Admin, Ali d5 is Sales, Test d51 is Contracter (Sales permissions), and Legale exists with no users.
+2. With a temporary admin token: create, edit and delete a role; check every `400`/`409` rule from 11.5.
+3. A temporary "Sales Manager" user: sees all customers, `/owners` works, can bulk-assign, `403` on Users/Roles.
+4. Remove `agent.use`, `knowledge.manage`, `customers.delete`, `customers.export` from a temporary role and check the `403`s.
+5. `npm run lint` and `npm run build` in `frontend`; then check the Users page, Roles card and a restricted user's UI in Chrome (asking before logging Ali out).
