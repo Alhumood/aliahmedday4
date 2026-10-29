@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api.js'
 import { useI18n } from '../i18n.jsx'
+import { useAuth } from '../auth.jsx'
 import Modal from './Modal.jsx'
 import ArticleForm from './ArticleForm.jsx'
 
@@ -9,6 +10,7 @@ const formatDate = (value, locale) =>
 
 export default function KnowledgePage({ onChat }) {
   const { t, locale } = useI18n()
+  const canManage = useAuth().can('knowledge.manage')
   const [articles, setArticles] = useState([])
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('')
@@ -76,8 +78,8 @@ export default function KnowledgePage({ onChat }) {
           <p className="muted">{t.knowledgeSubtitle}</p>
         </div>
         <div className="header-actions">
-          <button className="btn ghost" onClick={() => onChat(t.knowledgeChatPrompt)}>{t.chatWithAgent}</button>
-          <button className="btn primary" onClick={() => setEditing('new')}>{t.addArticle}</button>
+          {onChat && <button className="btn ghost" onClick={() => onChat(t.knowledgeChatPrompt)}>{t.chatWithAgent}</button>}
+          {canManage && <button className="btn primary" onClick={() => setEditing('new')}>{t.addArticle}</button>}
         </div>
       </header>
 
@@ -118,9 +120,15 @@ export default function KnowledgePage({ onChat }) {
                       <span className="article-caret">{open ? '▾' : '▸'}</span> {a.title}
                     </button>
                     <div className="article-actions">
-                      <button className="btn small primary-ghost" onClick={() => onChat(t.askAboutArticle(a))}>{t.askAi}</button>
-                      <button className="btn small ghost" onClick={() => setEditing(a)}>{t.edit}</button>
-                      <button className="btn small danger-ghost" onClick={() => setDeleting(a)}>{t.delete}</button>
+                      {onChat && (
+                        <button className="btn small primary-ghost" onClick={() => onChat(t.askAboutArticle(a))}>{t.askAi}</button>
+                      )}
+                      {canManage && (
+                        <>
+                          <button className="btn small ghost" onClick={() => setEditing(a)}>{t.edit}</button>
+                          <button className="btn small danger-ghost" onClick={() => setDeleting(a)}>{t.delete}</button>
+                        </>
+                      )}
                     </div>
                   </div>
                   <div className="article-meta muted small">

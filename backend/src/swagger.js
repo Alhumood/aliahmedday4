@@ -1,5 +1,6 @@
 import swaggerJsdoc from "swagger-jsdoc";
 import { fileURLToPath } from "node:url";
+import { PERMISSION_KEYS } from "./permissions.js";
 
 const customerProps = {
   name: { type: "string", example: "Jane Doe" },
@@ -12,7 +13,7 @@ const adminOwnerProp = {
     type: "integer",
     nullable: true,
     example: 2,
-    description: "Admin only, ignored for sales users. A sales user's id, or null for unassigned.",
+    description: "Needs customers.view_all, ignored otherwise. The id of a user who can own customers, or null for unassigned.",
   },
 };
 
@@ -32,13 +33,14 @@ export const swaggerSpec = swaggerJsdoc({
         "CRUD REST API for customers and the knowledge bank, plus a Claude-powered natural-language agent endpoint.",
         "",
         "**Authentication:** every endpoint except `/api/auth/register` and `/api/auth/login` requires a JWT.",
-        "Each sales user only sees and changes the customers assigned to them; other users' customers return 404.",
+        "Users without `customers.view_all` only see and change the customers assigned to them; other customers return 404.",
         "",
         "**Testing here:** call `POST /api/auth/register` (or `/login`), copy the `token` from the response,",
         "click **Authorize**, paste it, then try the Customers and Agent endpoints.",
         "",
-        "**Admins** see every customer (with `sales_user_name`), can assign customers to sales users and manage roles",
-        "under **Users**, including adding, editing and deleting users. Admins also manage **Job Titles** (labels only, not permissions).",
+        "**Roles and permissions:** each user has one role, and the role's permissions decide access (for example",
+        "`customers.view_all`, `customers.assign`, `users.manage`). Users with `users.manage` add, edit and delete users",
+        "under **Users** and manage **Roles**. The built-in Admin role has every permission except `customers.own`.",
         "Make the first admin locally with `npm run make-admin -- <email>` after registering, then log in again.",
       ].join("\n"),
     },
@@ -50,10 +52,10 @@ export const swaggerSpec = swaggerJsdoc({
       },
       responses: {
         Forbidden: {
-          description: "Admin access required",
+          description: "The user's role lacks the permission this endpoint needs",
           content: {
             "application/json": {
-              schema: { type: "object", properties: { error: { type: "string", example: "Admin access required" } } },
+              schema: { type: "object", properties: { error: { type: "string", example: "Permission required: users.manage" } } },
             },
           },
         },
@@ -90,9 +92,15 @@ export const swaggerSpec = swaggerJsdoc({
             user_id: { type: "integer", example: 1 },
             name: { type: "string", example: "Sara Sales" },
             email: { type: "string", example: "sara@example.com" },
-            role: { type: "string", enum: ["sales", "admin"], example: "sales" },
-            job_title_id: { type: "integer", nullable: true, example: 1 },
-            job_title: { type: "string", nullable: true, example: "Account Manager", description: "A label only; access depends on role" },
+            role_id: { type: "integer", example: 2 },
+            role: { type: "string", example: "Sales", description: "The role's name" },
+            role_key: {
+              type: "string",
+              nullable: true,
+              enum: ["admin", "sales", null],
+              description: "Set for the built-in roles, null for custom roles",
+            },
+            permissions: { type: "array", items: { type: "string", enum: PERMISSION_KEYS }, example: ["customers.own", "agent.use"] },
             created_at: { type: "string", format: "date-time" },
           },
         },
@@ -103,8 +111,7 @@ export const swaggerSpec = swaggerJsdoc({
             name: { type: "string", example: "Omar Sales" },
             email: { type: "string", format: "email", example: "omar@example.com" },
             password: { type: "string", format: "password", minLength: 8, example: "password123" },
-            role: { type: "string", enum: ["sales", "admin"], default: "sales" },
-            job_title_id: { type: "integer", nullable: true, example: 1 },
+            role_id: { type: "integer", example: 2, description: "Defaults to the built-in Sales role" },
           },
         },
         UserUpdate: {
@@ -114,8 +121,7 @@ export const swaggerSpec = swaggerJsdoc({
             name: { type: "string" },
             email: { type: "string", format: "email" },
             password: { type: "string", format: "password", minLength: 8, description: "Sets a new password" },
-            role: { type: "string", enum: ["sales", "admin"] },
-            job_title_id: { type: "integer", nullable: true, description: "null clears the job title" },
+            role_id: { type: "integer", description: "You cannot change your own role" },
           },
         },
         UserDelete: {
@@ -125,7 +131,7 @@ export const swaggerSpec = swaggerJsdoc({
               type: "integer",
               nullable: true,
               example: 2,
-              description: "Sales user who receives the deleted user's customers; null or omitted leaves them unassigned",
+              description: "User (who can own customers) who receives the deleted user's customers; null or omitted leaves them unassigned",
             },
           },
         },
@@ -140,19 +146,48 @@ export const swaggerSpec = swaggerJsdoc({
             reassigned_to: { type: "integer", nullable: true, example: 2 },
           },
         },
-        JobTitle: {
+        Permission: {
           type: "object",
           properties: {
-            job_title_id: { type: "integer", example: 1 },
-            name: { type: "string", example: "Account Manager" },
+            key: { type: "string", enum: PERMISSION_KEYS, example: "customers.view_all" },
+            description: { type: "string" },
+          },
+        },
+        Role: {
+          type: "object",
+          properties: {
+            role_id: { type: "integer", example: 3 },
+            name: { type: "string", example: "Sales Manager" },
+            permissions: { type: "array", items: { type: "string", enum: PERMISSION_KEYS } },
+            system_key: { type: "string", nullable: true, enum: ["admin", "sales", null], description: "Set for built-in roles" },
             created_at: { type: "string", format: "date-time" },
             user_count: { type: "integer", example: 3 },
           },
         },
-        JobTitleInput: {
+        RoleInput: {
           type: "object",
-          required: ["name"],
-          properties: { name: { type: "string", maxLength: 100, example: "Account Manager" } },
+          required: ["name", "permissions"],
+          properties: {
+            name: { type: "string", maxLength: 100, example: "Sales Manager" },
+            permissions: {
+              type: "array",
+              items: { type: "string", enum: PERMISSION_KEYS },
+              example: ["customers.view_all", "customers.assign", "customers.export", "agent.use"],
+              description: "Needs customers.view_all or customers.own; customers.assign needs customers.view_all",
+            },
+          },
+        },
+        RoleUpdate: {
+          type: "object",
+          description: "Only the fields sent are changed.",
+          properties: {
+            name: { type: "string", maxLength: 100 },
+            permissions: { type: "array", items: { type: "string", enum: PERMISSION_KEYS } },
+          },
+        },
+        CustomerOwner: {
+          type: "object",
+          properties: { user_id: { type: "integer", example: 2 }, name: { type: "string", example: "Sara Sales" } },
         },
         UserWithCount: {
           allOf: [
@@ -160,17 +195,17 @@ export const swaggerSpec = swaggerJsdoc({
             { type: "object", properties: { customer_count: { type: "integer", example: 3 } } },
           ],
         },
-        RoleUpdate: {
+        UserRoleUpdate: {
           type: "object",
-          required: ["role"],
-          properties: { role: { type: "string", enum: ["sales", "admin"], example: "admin" } },
+          required: ["role_id"],
+          properties: { role_id: { type: "integer", example: 1 } },
         },
         AssignInput: {
           type: "object",
           required: ["customer_ids", "sales_user_id"],
           properties: {
             customer_ids: { type: "array", items: { type: "integer" }, example: [1, 2, 3] },
-            sales_user_id: { type: "integer", nullable: true, example: 2, description: "A sales user's id, or null to unassign" },
+            sales_user_id: { type: "integer", nullable: true, example: 2, description: "The id of a user who can own customers, or null to unassign" },
           },
         },
         AuthResponse: {
@@ -189,9 +224,9 @@ export const swaggerSpec = swaggerJsdoc({
               type: "integer",
               nullable: true,
               example: 1,
-              description: "Owning sales user. Set from the token for sales users; admins can set it (null = unassigned).",
+              description: "Owning user. Set from the token without customers.view_all; with it, it can be set (null = unassigned).",
             },
-            sales_user_name: { type: "string", nullable: true, readOnly: true, description: "Owner's name (admin responses only)" },
+            sales_user_name: { type: "string", nullable: true, readOnly: true, description: "Owner's name (only with customers.view_all)" },
             created_at: { type: "string", format: "date-time" },
           },
         },

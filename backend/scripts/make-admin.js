@@ -1,4 +1,4 @@
-// Promotes an already registered user to admin. Run locally: npm run make-admin -- user@example.com
+// Gives an already registered user the built-in Admin role. Run locally: npm run make-admin -- user@example.com
 import "dotenv/config";
 import * as db from "../src/db.js";
 
@@ -14,7 +14,7 @@ async function main() {
     console.error(`No user is registered with ${email}. Register first, then run this again.`);
     return 1;
   }
-  if (user.role === "admin") {
+  if (user.role_key === "admin") {
     console.log(`${email} is already an admin.`);
     return 0;
   }
@@ -23,7 +23,8 @@ async function main() {
     console.error(`${email} still owns ${owned} customer(s). Reassign them before making this user an admin.`);
     return 1;
   }
-  await db.setUserRole(user.user_id, "admin");
+  const admin = await db.getSystemRole("admin");
+  await db.setUserRole(user.user_id, admin.role_id);
   console.log(`${email} is now an admin.`);
   return 0;
 }

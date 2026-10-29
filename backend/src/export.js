@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
 import bidiFactory from "bidi-js";
+import { can } from "./permissions.js";
 
 const FONTS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "fonts");
 const bidi = bidiFactory();
@@ -40,13 +41,13 @@ export const LABELS = {
   },
 };
 
-// Column keys with their relative PDF widths. The owner column is admin only.
+// Column keys with their relative PDF widths. The owner column needs customers.view_all.
 const COLUMNS = [
   { key: "id", weight: 0.7 },
   { key: "name", weight: 2.4 },
   { key: "email", weight: 2.6 },
   { key: "phone", weight: 1.4 },
-  { key: "owner", weight: 1.7, adminOnly: true },
+  { key: "owner", weight: 1.7, ownerOnly: true },
   { key: "created", weight: 1.1 },
 ];
 
@@ -62,7 +63,7 @@ export function fileName(format) {
 }
 
 function columnsFor(user) {
-  return COLUMNS.filter((c) => !c.adminOnly || user.role === "admin");
+  return COLUMNS.filter((c) => !c.ownerOnly || can(user, "customers.view_all"));
 }
 
 // The value of a column for one row, as text (PDF) or as a typed cell value (Excel).
@@ -77,7 +78,7 @@ function cellValue(row, key, labels) {
   }
 }
 
-// Header lines describing the export. filters = { name, ownerLabel } (ownerLabel only for admins).
+// Header lines describing the export. filters = { name, ownerLabel } (ownerLabel only with customers.view_all).
 function infoLines(labels, exportedBy, filters) {
   const lines = [`${labels.exportedOn}: ${isoDate(Date.now())}`, `${labels.exportedBy}: ${exportedBy}`];
   if (filters.name) lines.push(`${labels.search}: ${filters.name}`);

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useI18n } from '../i18n.jsx'
 
-// salesUsers is passed for admins only; it adds an Owner field.
+// salesUsers (possible owners) is passed with customers.view_all only; it adds an Owner field.
 export default function CustomerForm({ initial, salesUsers, onSubmit, onCancel }) {
   const { t } = useI18n()
   const [form, setForm] = useState({

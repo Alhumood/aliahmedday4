@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from './api.js'
-import { useI18n } from './i18n.jsx'
+import { roleName, useI18n } from './i18n.jsx'
 import { useAuth } from './auth.jsx'
 import AuthPage from './components/AuthPage.jsx'
 import CustomersPage from './components/CustomersPage.jsx'
@@ -13,8 +13,8 @@ const NAV = [
   { id: 'dashboard', labelKey: 'navDashboard', icon: '📊' },
   { id: 'customers', labelKey: 'navCustomers', icon: '👥' },
   { id: 'knowledge', labelKey: 'navKnowledge', icon: '📚' },
-  { id: 'chat', labelKey: 'navChat', icon: '✨' },
-  { id: 'users', labelKey: 'navUsers', icon: '🛡️', adminOnly: true },
+  { id: 'chat', labelKey: 'navChat', icon: '✨', permission: 'agent.use' },
+  { id: 'users', labelKey: 'navUsers', icon: '🛡️', permission: 'users.manage' },
 ]
 
 export default function App() {
@@ -25,7 +25,7 @@ export default function App() {
 
 function MainLayout() {
   const { t, toggle } = useI18n()
-  const { user, logout } = useAuth()
+  const { user, can, logout } = useAuth()
   const [page, setPage] = useState('dashboard')
   const [chatPrompt, setChatPrompt] = useState(null)
   const [customerOwner, setCustomerOwner] = useState('')
@@ -36,7 +36,8 @@ function MainLayout() {
   }, [])
 
   const online = health?.status === 'ok'
-  const isAdmin = user.role === 'admin'
+  // Pages only show their AI buttons when they get an onChat callback.
+  const chat = can('agent.use') ? openChat : null
 
   function openChat(prompt = null) {
     setChatPrompt(prompt)
@@ -56,7 +57,7 @@ function MainLayout() {
           <span>{t.appName}</span>
         </div>
         <nav>
-          {NAV.filter((item) => isAdmin || !item.adminOnly).map((item) => (
+          {NAV.filter((item) => !item.permission || can(item.permission)).map((item) => (
             <button
               key={item.id}
               className={`nav-item ${page === item.id ? 'active' : ''}`}
@@ -75,7 +76,7 @@ function MainLayout() {
           <span className="avatar">{user.name.slice(0, 2).toUpperCase()}</span>
           <div className="user-info">
             <span className="user-name">{user.name}</span>
-            <span className="user-role">{user.job_title ?? t.roles[user.role] ?? user.role}</span>
+            <span className="user-role">{roleName(t, user.role, user.role_key)}</span>
           </div>
           <button className="logout-btn" onClick={logout} title={t.logout}>{t.logout}</button>
         </div>
@@ -92,11 +93,11 @@ function MainLayout() {
         </div>
       </aside>
       <main className="content">
-        {page === 'dashboard' && <DashboardPage onNavigate={setPage} onChat={openChat} />}
-        {page === 'customers' && <CustomersPage key={customerOwner} initialOwner={customerOwner} onChat={openChat} />}
-        {page === 'knowledge' && <KnowledgePage onChat={openChat} />}
-        {page === 'chat' && <ChatPage initialPrompt={chatPrompt} />}
-        {page === 'users' && isAdmin && <UsersPage onViewCustomers={openCustomers} />}
+        {page === 'dashboard' && <DashboardPage onNavigate={setPage} onChat={chat} />}
+        {page === 'customers' && <CustomersPage key={customerOwner} initialOwner={customerOwner} onChat={chat} />}
+        {page === 'knowledge' && <KnowledgePage onChat={chat} />}
+        {page === 'chat' && chat && <ChatPage initialPrompt={chatPrompt} />}
+        {page === 'users' && can('users.manage') && <UsersPage onViewCustomers={openCustomers} />}
       </main>
     </div>
   )

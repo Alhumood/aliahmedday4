@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { randomUUID } from "node:crypto";
 import * as db from "./db.js";
+import { can } from "./permissions.js";
 
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-5-5";
 const EFFORT = process.env.AGENT_EFFORT || "low";
@@ -12,19 +13,21 @@ const fallbackParams = FALLBACK_MODELS.has(MODEL)
 const MAX_TOOL_ROUNDS = 8;
 
 const ACCESS_RULES = {
-  sales: "You only have access to the customers assigned to the signed-in sales person; if a customer is not found, say so and do not speculate about other users' data.",
-  admin: "You are assisting an administrator who can see every customer; mention the owning sales person (sales_user_name) when listing customers, and 'Unassigned' when there is none. Customers you add are created unassigned, and you cannot change a customer's owner.",
+  own: "You only have access to the customers assigned to the signed-in user; if a customer is not found, say so and do not speculate about other users' data.",
+  all: "You are assisting a user who can see every customer; mention the owner (sales_user_name) when listing customers, and 'Unassigned' when there is none. Customers you add are created unassigned, and you cannot change a customer's owner.",
 };
 
-// Rebuilt on every call from the current role, so a role change applies to existing conversations.
+const seesAll = (user) => can(user, "customers.view_all");
+
+// Rebuilt on every call from the current permissions, so a role change applies to existing conversations.
 const systemPrompt = (user) => `You are a customer-data assistant for an internal CRM.
-${ACCESS_RULES[user.role] ?? ACCESS_RULES.sales}
+${seesAll(user) ? ACCESS_RULES.all : ACCESS_RULES.own}
 Answer questions about customers using the provided tools; never invent customer records.
 When the user asks to add or change a customer, call the matching tool, then confirm what was saved.
 If a name search returns several matches, list them and ask which one the user means before updating.
 For questions about policies, procedures, products or how-tos, search the knowledge bank first and answer from the articles you find, citing the article title. If nothing relevant is found, say so instead of guessing.
 Reply in the same language the user writes in (for example Arabic or English).
-Keep answers short. Present lists of customers as a Markdown table with id, name, email and phone${user.role === "admin" ? " and owner" : ""}, with column headers in the reply language.`;
+Keep answers short. Present lists of customers as a Markdown table with id, name, email and phone${seesAll(user) ? " and owner" : ""}, with column headers in the reply language.`;
 
 const tools = [
   {
@@ -98,7 +101,7 @@ const tools = [
   },
 ];
 
-// user (id and role) always comes from the authenticated request, never from the model's tool input.
+// user (id and permissions) always comes from the authenticated request, never from the model's tool input.
 async function executeTool(user, name, input) {
   switch (name) {
     case "get_all_customers":

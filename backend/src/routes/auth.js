@@ -11,8 +11,8 @@ const isBlank = (value) => typeof value !== "string" || !value.trim();
  * /api/auth/register:
  *   post:
  *     tags: [Auth]
- *     summary: Register a new sales user
- *     description: The role is always `sales`; a role in the body is ignored. Returns a token to use with **Authorize**.
+ *     summary: Register a new user (built-in Sales role)
+ *     description: The user always gets the built-in Sales role; a role in the body is ignored. Returns a token to use with **Authorize**.
  *     security: []
  *     requestBody:
  *       required: true

@@ -3,10 +3,10 @@ import express from "express";
 import cors from "cors";
 import { swaggerSpec } from "./swagger.js";
 import { pool } from "./db.js";
-import { requireAuth } from "./auth.js";
+import { requireAuth, requirePermission } from "./auth.js";
 import authRoutes from "./routes/auth.js";
 import usersRoutes from "./routes/users.js";
-import jobTitlesRoutes from "./routes/jobTitles.js";
+import rolesRoutes from "./routes/roles.js";
 import customerRoutes from "./routes/customers.js";
 import agentRoutes from "./routes/agent.js";
 import knowledgeRoutes from "./routes/knowledge.js";
@@ -59,10 +59,10 @@ app.get("/api/health", async (_req, res) => {
 
 app.use("/api/auth", authRoutes);
 app.use("/api/users", requireAuth, usersRoutes);
-app.use("/api/job-titles", requireAuth, jobTitlesRoutes);
+app.use("/api/roles", requireAuth, rolesRoutes);
 app.use("/api/customers", requireAuth, customerRoutes);
 app.use("/api/knowledge", requireAuth, knowledgeRoutes);
-app.use("/api/agent", requireAuth, agentRoutes);
+app.use("/api/agent", requireAuth, requirePermission("agent.use"), agentRoutes);
 
 app.use((err, _req, res, _next) => {
   console.error(err);

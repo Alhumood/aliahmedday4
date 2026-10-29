@@ -1,17 +1,15 @@
 import { Router } from "express";
 import * as db from "../db.js";
-import { requireAdmin, hashPassword, EMAIL_RE, MIN_PASSWORD_LENGTH } from "../auth.js";
+import { requirePermission, hashPassword, EMAIL_RE, MIN_PASSWORD_LENGTH } from "../auth.js";
 
 const router = Router();
-router.use(requireAdmin);
-
-const ROLES = ["sales", "admin"];
+router.use(requirePermission("users.manage"));
 
 // Validates the user fields in body and converts them for db.createUser/updateUser.
 // On create, name, email and password are required. Returns { fields } or { error }.
 async function readUserFields(body, { creating }) {
   const fields = {};
-  const { name, email, password, role, job_title_id: jobTitleId } = body ?? {};
+  const { name, email, password, role_id: roleId } = body ?? {};
   if (creating || name !== undefined) {
     if (typeof name !== "string" || !name.trim()) return { error: "name is required" };
     fields.name = name.trim();
@@ -26,20 +24,23 @@ async function readUserFields(body, { creating }) {
     }
     fields.passwordHash = await hashPassword(password);
   }
-  if (role !== undefined) {
-    if (!ROLES.includes(role)) return { error: "role must be 'sales' or 'admin'" };
-    fields.role = role;
-  }
-  if (jobTitleId !== undefined) {
-    if (jobTitleId !== null && !(Number.isInteger(jobTitleId) && (await db.jobTitleExists(jobTitleId)))) {
-      return { error: "job_title_id must be an existing job title or null" };
-    }
-    fields.jobTitleId = jobTitleId;
+  if (roleId !== undefined) {
+    if (!(Number.isInteger(roleId) && (await db.getRole(roleId)))) return { error: "role_id must be an existing role" };
+    fields.roleId = roleId;
   }
   return { fields };
 }
 
-const OWNS_CUSTOMERS = "Reassign this user's customers before making them an admin";
+// Checks moving user `id` to `roleId`. Returns { status, error } when it is not allowed, else null.
+async function checkRoleChange(req, id, current, roleId) {
+  if (roleId === current.role_id) return null;
+  if (id === req.user.user_id) return { status: 400, error: "You cannot change your own role" };
+  const role = await db.getRole(roleId);
+  if (!role.permissions.includes("customers.own") && (await db.countCustomersOwnedBy(id)) > 0) {
+    return { status: 409, error: "Reassign this user's customers before giving them a role that cannot own customers" };
+  }
+  return null;
+}
 
 function parseId(req, res) {
   const id = Number.parseInt(req.params.id, 10);
@@ -55,7 +56,7 @@ function parseId(req, res) {
  * /api/users:
  *   get:
  *     tags: [Users]
- *     summary: List all users with their customer counts (admin only)
+ *     summary: List all users with their customer counts (users.manage)
  *     responses:
  *       200:
  *         description: Array of users
@@ -80,7 +81,7 @@ router.get("/", async (_req, res, next) => {
  * /api/users/{id}:
  *   get:
  *     tags: [Users]
- *     summary: Get a user with their customer count (admin only)
+ *     summary: Get a user with their customer count (users.manage)
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: integer } }
  *     responses:
@@ -110,8 +111,8 @@ router.get("/:id", async (req, res, next) => {
  * /api/users:
  *   post:
  *     tags: [Users]
- *     summary: Add a user (admin only)
- *     description: Role defaults to sales. The admin sets the initial password.
+ *     summary: Add a user (users.manage)
+ *     description: role_id defaults to the built-in Sales role. The admin sets the initial password.
  *     requestBody:
  *       required: true
  *       content:
@@ -144,10 +145,10 @@ router.post("/", async (req, res, next) => {
  * /api/users/{id}:
  *   patch:
  *     tags: [Users]
- *     summary: Edit a user (admin only)
+ *     summary: Edit a user (users.manage)
  *     description: |
- *       Only the fields sent are changed. Sending `password` sets a new password; `job_title_id: null` clears the title.
- *       Admins cannot change their own role, and a user who owns customers cannot be made an admin.
+ *       Only the fields sent are changed. Sending `password` sets a new password.
+ *       You cannot change your own role, and a user who owns customers cannot get a role without `customers.own`.
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: integer } }
  *     requestBody:
@@ -165,7 +166,7 @@ router.post("/", async (req, res, next) => {
  *       401: { $ref: '#/components/responses/Unauthorized' }
  *       403: { $ref: '#/components/responses/Forbidden' }
  *       404: { description: User not found }
- *       409: { description: Email is already registered, or the user still owns customers }
+ *       409: { description: Email is already registered, or the user still owns customers and the new role cannot own them }
  */
 router.patch("/:id", async (req, res, next) => {
   try {
@@ -175,11 +176,9 @@ router.patch("/:id", async (req, res, next) => {
     if (error) return res.status(400).json({ error });
     const current = await db.getUserById(id);
     if (!current) return res.status(404).json({ error: "User not found" });
-    if (fields.role !== undefined && fields.role !== current.role) {
-      if (id === req.user.user_id) return res.status(400).json({ error: "You cannot change your own role" });
-      if (fields.role === "admin" && (await db.countCustomersOwnedBy(id)) > 0) {
-        return res.status(409).json({ error: OWNS_CUSTOMERS });
-      }
+    if (fields.roleId !== undefined) {
+      const refused = await checkRoleChange(req, id, current, fields.roleId);
+      if (refused) return res.status(refused.status).json({ error: refused.error });
     }
     await db.updateUser(id, fields);
     res.json(await db.getUserWithCount(id));
@@ -193,10 +192,10 @@ router.patch("/:id", async (req, res, next) => {
  * /api/users/{id}:
  *   delete:
  *     tags: [Users]
- *     summary: Delete a user (admin only)
+ *     summary: Delete a user (users.manage)
  *     description: |
- *       The user's customers are never deleted. They move to `reassign_to` (a sales user),
- *       or become unassigned when it is null or omitted. Admins cannot delete themselves.
+ *       The user's customers are never deleted. They move to `reassign_to` (a user who can own customers),
+ *       or become unassigned when it is null or omitted. You cannot delete yourself.
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: integer } }
  *     requestBody:
@@ -210,7 +209,7 @@ router.patch("/:id", async (req, res, next) => {
  *         content:
  *           application/json:
  *             schema: { $ref: '#/components/schemas/UserDeleteResult' }
- *       400: { description: Deleting your own account, or reassign_to is not another sales user }
+ *       400: { description: Deleting your own account, or reassign_to is not another user who can own customers }
  *       401: { $ref: '#/components/responses/Unauthorized' }
  *       403: { $ref: '#/components/responses/Forbidden' }
  *       404: { description: User not found }
@@ -221,8 +220,8 @@ router.delete("/:id", async (req, res, next) => {
     if (id === null) return;
     if (id === req.user.user_id) return res.status(400).json({ error: "You cannot delete your own account" });
     const reassignTo = req.body?.reassign_to ?? null;
-    if (reassignTo !== null && (reassignTo === id || !Number.isInteger(reassignTo) || !(await db.isSalesUser(reassignTo)))) {
-      return res.status(400).json({ error: "reassign_to must be another sales user or null" });
+    if (reassignTo !== null && (reassignTo === id || !Number.isInteger(reassignTo) || !(await db.canOwnCustomers(reassignTo)))) {
+      return res.status(400).json({ error: "reassign_to must be another user who can own customers, or null" });
     }
     const result = await db.deleteUser(id, reassignTo);
     if (!result) return res.status(404).json({ error: "User not found" });
@@ -237,39 +236,41 @@ router.delete("/:id", async (req, res, next) => {
  * /api/users/{id}/role:
  *   patch:
  *     tags: [Users]
- *     summary: Change a user's role (admin only)
- *     description: Admins cannot change their own role. A user who still owns customers cannot be made an admin.
+ *     summary: Change a user's role (users.manage)
+ *     description: You cannot change your own role. A user who still owns customers cannot get a role without `customers.own`.
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: integer } }
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
- *           schema: { $ref: '#/components/schemas/RoleUpdate' }
+ *           schema: { $ref: '#/components/schemas/UserRoleUpdate' }
  *     responses:
  *       200:
  *         description: The updated user
  *         content:
  *           application/json:
  *             schema: { $ref: '#/components/schemas/User' }
- *       400: { description: Invalid role, or trying to change your own role }
+ *       400: { description: Unknown role_id, or trying to change your own role }
  *       401: { $ref: '#/components/responses/Unauthorized' }
  *       403: { $ref: '#/components/responses/Forbidden' }
  *       404: { description: User not found }
- *       409: { description: The user still owns customers }
+ *       409: { description: The user still owns customers and the role cannot own customers }
  */
 router.patch("/:id/role", async (req, res, next) => {
   try {
     const id = parseId(req, res);
     if (id === null) return;
-    const { role } = req.body ?? {};
-    if (!ROLES.includes(role)) return res.status(400).json({ error: "role must be 'sales' or 'admin'" });
-    if (id === req.user.user_id) return res.status(400).json({ error: "You cannot change your own role" });
-    if (!(await db.getUserById(id))) return res.status(404).json({ error: "User not found" });
-    if (role === "admin" && (await db.countCustomersOwnedBy(id)) > 0) {
-      return res.status(409).json({ error: OWNS_CUSTOMERS });
+    const { role_id: roleId } = req.body ?? {};
+    if (!(Number.isInteger(roleId) && (await db.getRole(roleId)))) {
+      return res.status(400).json({ error: "role_id must be an existing role" });
     }
-    res.json(await db.setUserRole(id, role));
+    if (id === req.user.user_id) return res.status(400).json({ error: "You cannot change your own role" });
+    const current = await db.getUserById(id);
+    if (!current) return res.status(404).json({ error: "User not found" });
+    const refused = await checkRoleChange(req, id, current, roleId);
+    if (refused) return res.status(refused.status).json({ error: refused.error });
+    res.json(await db.setUserRole(id, roleId));
   } catch (err) {
     next(err);
   }

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import * as db from "../db.js";
+import { requirePermission } from "../auth.js";
 
 const router = Router();
 
@@ -78,7 +79,7 @@ router.get("/:id", async (req, res, next) => {
  * /api/knowledge:
  *   post:
  *     tags: [Knowledge]
- *     summary: Create a knowledge article
+ *     summary: Create a knowledge article (knowledge.manage)
  *     requestBody:
  *       required: true
  *       content:
@@ -86,6 +87,7 @@ router.get("/:id", async (req, res, next) => {
  *           schema: { $ref: '#/components/schemas/ArticleInput' }
  *     responses:
  *       401: { $ref: '#/components/responses/Unauthorized' }
+ *       403: { $ref: '#/components/responses/Forbidden' }
  *       201:
  *         description: Created article
  *         content:
@@ -93,7 +95,7 @@ router.get("/:id", async (req, res, next) => {
  *             schema: { $ref: '#/components/schemas/Article' }
  *       400: { description: Validation error }
  */
-router.post("/", async (req, res, next) => {
+router.post("/", requirePermission("knowledge.manage"), async (req, res, next) => {
   try {
     const { title, category, content } = req.body ?? {};
     if (isBlank(title)) return res.status(400).json({ error: "title is required" });
@@ -111,7 +113,7 @@ router.post("/", async (req, res, next) => {
  * /api/knowledge/{id}:
  *   put:
  *     tags: [Knowledge]
- *     summary: Update a knowledge article (only provided fields change)
+ *     summary: Update a knowledge article (only provided fields change) (knowledge.manage)
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: integer } }
  *     requestBody:
@@ -121,6 +123,7 @@ router.post("/", async (req, res, next) => {
  *           schema: { $ref: '#/components/schemas/ArticleUpdate' }
  *     responses:
  *       401: { $ref: '#/components/responses/Unauthorized' }
+ *       403: { $ref: '#/components/responses/Forbidden' }
  *       200:
  *         description: Updated article
  *         content:
@@ -128,7 +131,7 @@ router.post("/", async (req, res, next) => {
  *             schema: { $ref: '#/components/schemas/Article' }
  *       404: { description: Article not found }
  */
-router.put("/:id", async (req, res, next) => {
+router.put("/:id", requirePermission("knowledge.manage"), async (req, res, next) => {
   try {
     const id = parseId(req, res);
     if (id === null) return;
@@ -148,11 +151,12 @@ router.put("/:id", async (req, res, next) => {
  * /api/knowledge/{id}:
  *   delete:
  *     tags: [Knowledge]
- *     summary: Delete a knowledge article
+ *     summary: Delete a knowledge article (knowledge.manage)
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: integer } }
  *     responses:
  *       401: { $ref: '#/components/responses/Unauthorized' }
+ *       403: { $ref: '#/components/responses/Forbidden' }
  *       200:
  *         description: Deleted article
  *         content:
@@ -160,7 +164,7 @@ router.put("/:id", async (req, res, next) => {
  *             schema: { $ref: '#/components/schemas/Article' }
  *       404: { description: Article not found }
  */
-router.delete("/:id", async (req, res, next) => {
+router.delete("/:id", requirePermission("knowledge.manage"), async (req, res, next) => {
   try {
     const id = parseId(req, res);
     if (id === null) return;

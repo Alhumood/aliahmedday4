@@ -275,22 +275,28 @@ tbody tr:hover { background: #fafbff; }
   .toolbar .select { max-width: none; flex: 1; }
 }
 
-/* Admin: user actions and job titles */
+/* Users page: user actions and roles */
 .nowrap { white-space: nowrap; }
 .modal-text { margin: 0; line-height: 1.5; }
-.job-titles { margin-top: 20px; }
-.job-titles-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 16px; border-bottom: 1px solid var(--border); }
-.job-titles-header .muted.small { margin: 4px 0 0; }
-.job-title-add, .job-title-rename { display: flex; gap: 8px; align-items: center; }
-.job-title-add .search { width: 220px; }
-.job-title-rename { flex: 1; }
-.job-title-rename .search { flex: 1; max-width: 320px; padding: 6px 10px; }
-.job-title-list { list-style: none; margin: 0; padding: 0; }
-.job-title-row { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-top: 1px solid var(--border); min-height: 52px; }
-.job-title-row:first-child { border-top: 0; }
-.job-title-name { font-weight: 600; }
-.job-title-actions { margin-inline-start: auto; white-space: nowrap; }
+.roles { margin-top: 20px; }
+.roles-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 16px; border-bottom: 1px solid var(--border); }
+.roles-header .muted.small { margin: 4px 0 0; }
+.role-list { list-style: none; margin: 0; padding: 0; }
+.role-row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-top: 1px solid var(--border); }
+.role-row:first-child { border-top: 0; }
+.role-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.role-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.role-name { font-weight: 600; }
+.role-actions { margin-inline-start: auto; white-space: nowrap; }
+.permission-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.permission-tag { font-weight: 500; }
+.permission-list { border: 1px solid var(--border); border-radius: 8px; margin: 0; padding: 8px 12px 12px; display: flex; flex-direction: column; gap: 10px; }
+.permission-list legend { font-size: 13px; font-weight: 600; padding: 0 4px; }
+.form .permission-option { flex-direction: row; align-items: flex-start; gap: 10px; font-weight: 400; cursor: pointer; }
+.form .permission-option input { flex: none; width: 16px; height: 16px; margin: 2px 0 0; padding: 0; accent-color: var(--primary); }
+.permission-option > span { display: flex; flex-direction: column; gap: 2px; }
+.permission-label { font-weight: 600; }
 @media (max-width: 760px) {
-  .job-title-add { width: 100%; }
-  .job-title-add .search { flex: 1; width: auto; }
+  .role-row { flex-direction: column; align-items: flex-start; }
+  .role-actions { margin-inline-start: 0; }
 }

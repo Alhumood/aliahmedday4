@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api.js'
 import { useAuth } from '../auth.jsx'
-import { useI18n } from '../i18n.jsx'
+import { roleName, useI18n } from '../i18n.jsx'
 import Modal from './Modal.jsx'
 import UserForm from './UserForm.jsx'
-import JobTitlesCard from './JobTitlesCard.jsx'
+import RolesCard from './RolesCard.jsx'
 
 const formatDate = (value, locale) =>
   value ? new Date(value).toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
@@ -16,7 +16,7 @@ export default function UsersPage({ onViewCustomers }) {
   const { t, locale } = useI18n()
   const { user: me, refresh } = useAuth()
   const [users, setUsers] = useState([])
-  const [jobTitles, setJobTitles] = useState([])
+  const [roles, setRoles] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(null) // user_id whose role is being changed
@@ -31,9 +31,9 @@ export default function UsersPage({ onViewCustomers }) {
   const load = useCallback(async () => {
     setError('')
     try {
-      const [userList, titleList] = await Promise.all([api.listUsers(), api.listJobTitles()])
+      const [userList, roleList] = await Promise.all([api.listUsers(), api.listRoles()])
       setUsers(userList)
-      setJobTitles(titleList)
+      setRoles(roleList)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -50,12 +50,12 @@ export default function UsersPage({ onViewCustomers }) {
     setTimeout(() => setToast(''), 2500)
   }
 
-  async function changeRole(u, role) {
+  async function changeRole(u, roleId) {
     setSaving(u.user_id)
     setError('')
     try {
-      await api.setUserRole(u.user_id, role)
-      notify(t.roleUpdated(u.name, t.roles[role]))
+      const updated = await api.setUserRole(u.user_id, roleId)
+      notify(t.roleUpdated(u.name, roleName(t, updated.role, updated.role_key)))
       await load()
     } catch (err) {
       setError(err.message)
@@ -94,8 +94,11 @@ export default function UsersPage({ onViewCustomers }) {
     }
   }
 
-  const count = (role) => (loading ? '—' : users.filter((u) => u.role === role).length)
-  const reassignTargets = deleting ? users.filter((u) => u.role === 'sales' && u.user_id !== deleting.user_id) : []
+  const has = (u, key) => u.permissions.includes(key)
+  const count = (key) => (loading ? '—' : users.filter((u) => has(u, key)).length)
+  const reassignTargets = deleting
+    ? users.filter((u) => has(u, 'customers.own') && u.user_id !== deleting.user_id)
+    : []
 
   return (
     <div className="page">
@@ -116,12 +119,12 @@ export default function UsersPage({ onViewCustomers }) {
           <span className="stat-value">{loading ? '—' : users.length}</span>
         </div>
         <div className="stat-card">
-          <span className="stat-label">{t.salesUsers}</span>
-          <span className="stat-value">{count('sales')}</span>
+          <span className="stat-label">{t.customerOwners}</span>
+          <span className="stat-value">{count('customers.own')}</span>
         </div>
         <div className="stat-card">
-          <span className="stat-label">{t.adminUsers}</span>
-          <span className="stat-value">{count('admin')}</span>
+          <span className="stat-label">{t.userManagers}</span>
+          <span className="stat-value">{count('users.manage')}</span>
         </div>
       </div>
 
@@ -132,7 +135,6 @@ export default function UsersPage({ onViewCustomers }) {
             <thead>
               <tr>
                 <th>{t.colUser}</th>
-                <th>{t.jobTitle}</th>
                 <th>{t.colRole}</th>
                 <th>{t.colCustomers}</th>
                 <th>{t.colCreated}</th>
@@ -141,9 +143,9 @@ export default function UsersPage({ onViewCustomers }) {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={6} className="empty">{t.loading}</td></tr>
+                <tr><td colSpan={5} className="empty">{t.loading}</td></tr>
               ) : users.length === 0 ? (
-                <tr><td colSpan={6} className="empty">{t.noUsers}</td></tr>
+                <tr><td colSpan={5} className="empty">{t.noUsers}</td></tr>
               ) : (
                 users.map((u) => {
                   const isMe = u.user_id === me.user_id
@@ -160,24 +162,28 @@ export default function UsersPage({ onViewCustomers }) {
                           </div>
                         </div>
                       </td>
-                      <td>{u.job_title ?? <span className="muted">—</span>}</td>
                       <td>
                         <select
                           className="select"
-                          value={u.role}
+                          value={u.role_id}
                           disabled={isMe || saving === u.user_id}
                           title={isMe ? t.cannotChangeOwnRole : undefined}
-                          onChange={(e) => changeRole(u, e.target.value)}
+                          onChange={(e) => changeRole(u, Number(e.target.value))}
                           aria-label={t.colRole}
                         >
-                          <option value="sales">{t.roles.sales}</option>
-                          <option value="admin">{t.roles.admin}</option>
+                          {roles.map((r) => (
+                            <option key={r.role_id} value={r.role_id}>{roleName(t, r.name, r.system_key)}</option>
+                          ))}
                         </select>
                       </td>
-                      <td>{u.role === 'sales' ? u.customer_count : <span className="muted">—</span>}</td>
+                      <td>
+                        {has(u, 'customers.own') || u.customer_count > 0
+                          ? u.customer_count
+                          : <span className="muted">—</span>}
+                      </td>
                       <td className="muted">{formatDate(u.created_at, locale)}</td>
                       <td className="end nowrap">
-                        {u.role === 'sales' && (
+                        {has(u, 'customers.own') && (
                           <button className="btn small primary-ghost" onClick={() => onViewCustomers(String(u.user_id))}>
                             {t.viewCustomers}
                           </button>
@@ -196,13 +202,14 @@ export default function UsersPage({ onViewCustomers }) {
         </div>
       </div>
 
-      {!loading && <JobTitlesCard jobTitles={jobTitles} onChanged={load} notify={notify} />}
+      {/* A role change can rename or re-permission the admin's own role, so the sidebar is refreshed too. */}
+      {!loading && <RolesCard roles={roles} onChanged={() => { refresh(); return load() }} notify={notify} />}
 
       {editing && (
         <Modal title={editing === 'new' ? t.addUser.replace('+ ', '') : t.editUser} onClose={() => setEditing(null)}>
           <UserForm
             initial={editing === 'new' ? null : editing}
-            jobTitles={jobTitles}
+            roles={roles}
             isSelf={editing !== 'new' && editing.user_id === me.user_id}
             onSubmit={handleSave}
             onCancel={() => setEditing(null)}

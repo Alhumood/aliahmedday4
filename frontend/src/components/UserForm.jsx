@@ -1,16 +1,16 @@
 import { useState } from 'react'
-import { useI18n } from '../i18n.jsx'
+import { roleName, useI18n } from '../i18n.jsx'
 
 // initial is null when adding; when editing, only changed fields are submitted
 // and an empty password keeps the current one.
-export default function UserForm({ initial, jobTitles, isSelf, onSubmit, onCancel }) {
+export default function UserForm({ initial, roles, isSelf, onSubmit, onCancel }) {
   const { t } = useI18n()
   const [form, setForm] = useState({
     name: initial?.name ?? '',
     email: initial?.email ?? '',
     password: '',
-    role: initial?.role ?? 'sales',
-    jobTitle: initial?.job_title_id ? String(initial.job_title_id) : '',
+    // New users default to the built-in Sales role.
+    roleId: String(initial?.role_id ?? roles.find((r) => r.system_key === 'sales')?.role_id ?? ''),
   })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -26,15 +26,14 @@ export default function UserForm({ initial, jobTitles, isSelf, onSubmit, onCance
     const values = {
       name: form.name.trim(),
       email: form.email.trim(),
-      role: form.role,
-      job_title_id: form.jobTitle ? Number(form.jobTitle) : null,
+      role_id: Number(form.roleId),
     }
     let body = values
     if (initial) {
       body = Object.fromEntries(
         Object.entries(values).filter(([key, value]) => value !== (initial[key] ?? null)),
       )
-      if (isSelf) delete body.role
+      if (isSelf) delete body.role_id
     }
     if (form.password) body.password = form.password
 
@@ -71,20 +70,12 @@ export default function UserForm({ initial, jobTitles, isSelf, onSubmit, onCance
       </label>
       <label>
         {t.colRole}
-        <select className="select" value={form.role} onChange={update('role')} disabled={isSelf}>
-          <option value="sales">{t.roles.sales}</option>
-          <option value="admin">{t.roles.admin}</option>
-        </select>
-        {isSelf && <span className="hint">{t.cannotChangeOwnRole}</span>}
-      </label>
-      <label>
-        {t.jobTitle}
-        <select className="select" value={form.jobTitle} onChange={update('jobTitle')}>
-          <option value="">{t.noJobTitle}</option>
-          {jobTitles.map((jt) => (
-            <option key={jt.job_title_id} value={jt.job_title_id}>{jt.name}</option>
+        <select className="select" value={form.roleId} onChange={update('roleId')} disabled={isSelf}>
+          {roles.map((r) => (
+            <option key={r.role_id} value={r.role_id}>{roleName(t, r.name, r.system_key)}</option>
           ))}
         </select>
+        {isSelf && <span className="hint">{t.cannotChangeOwnRole}</span>}
       </label>
       {error && <div className="alert error">{error}</div>}
       <div className="form-actions">

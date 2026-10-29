@@ -80,7 +80,7 @@ function CompletenessRow({ label, count, total }) {
 
 export default function DashboardPage({ onNavigate, onChat }) {
   const { t, locale } = useI18n()
-  const isAdmin = useAuth().user.role === 'admin'
+  const seesAll = useAuth().can('customers.view_all')
   const [customers, setCustomers] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -124,7 +124,7 @@ export default function DashboardPage({ onNavigate, onChat }) {
         </div>
         <div className="header-actions">
           <button className="btn ghost" onClick={load}>{t.refresh}</button>
-          <button className="btn primary" onClick={() => onChat()}>{t.chatWithAgent}</button>
+          {onChat && <button className="btn primary" onClick={() => onChat()}>{t.chatWithAgent}</button>}
         </div>
       </header>
 
@@ -145,7 +145,7 @@ export default function DashboardPage({ onNavigate, onChat }) {
           <span className="stat-value">{value(complete)}</span>
           {!loading && <span className="muted small">{t.dashCompleteHint}</span>}
         </div>
-        {isAdmin ? (
+        {seesAll ? (
           <div className="stat-card">
             <span className="stat-label">{t.dashUnassigned}</span>
             <span className="stat-value">{value(unassigned)}</span>
@@ -177,7 +177,7 @@ export default function DashboardPage({ onNavigate, onChat }) {
               <CompletenessRow label={t.withEmail} count={withEmail} total={total} />
               <CompletenessRow label={t.withPhone} count={withPhone} total={total} />
               <CompletenessRow label={t.dashComplete} count={complete} total={total} />
-              {isAdmin && <CompletenessRow label={t.dashMissing} count={total - complete} total={total} />}
+              {seesAll && <CompletenessRow label={t.dashMissing} count={total - complete} total={total} />}
             </div>
           )}
         </section>
@@ -202,7 +202,9 @@ export default function DashboardPage({ onNavigate, onChat }) {
                       <div className="muted small">{c.email ? <bdi>{c.email}</bdi> : t.noEmail}</div>
                     </div>
                   </div>
-                  <button className="btn small primary-ghost" onClick={() => onChat(t.askAboutPrompt(c))}>{t.askAi}</button>
+                  {onChat && (
+                    <button className="btn small primary-ghost" onClick={() => onChat(t.askAboutPrompt(c))}>{t.askAi}</button>
+                  )}
                 </li>
               ))}
             </ul>

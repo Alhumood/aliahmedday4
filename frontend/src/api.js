@@ -60,7 +60,7 @@ export const api = {
   register: (body) => request('/api/auth/register', { method: 'POST', body }),
   login: (body) => request('/api/auth/login', { method: 'POST', body }),
   me: () => request('/api/auth/me'),
-  // salesUserId (admin only): a user id, 'none' for unassigned, or empty for all.
+  // salesUserId (customers.view_all only): a user id, 'none' for unassigned, or empty for all.
   listCustomers: (name, salesUserId) => {
     const params = new URLSearchParams()
     if (name) params.set('name', name)
@@ -78,19 +78,21 @@ export const api = {
   createCustomer: (body) => request('/api/customers', { method: 'POST', body }),
   updateCustomer: (id, body) => request(`/api/customers/${id}`, { method: 'PUT', body }),
   deleteCustomer: (id) => request(`/api/customers/${id}`, { method: 'DELETE' }),
+  listCustomerOwners: () => request('/api/customers/owners'),
   assignCustomers: (customerIds, salesUserId) =>
     request('/api/customers/assign', { method: 'POST', body: { customer_ids: customerIds, sales_user_id: salesUserId } }),
   listUsers: () => request('/api/users'),
-  setUserRole: (id, role) => request(`/api/users/${id}/role`, { method: 'PATCH', body: { role } }),
+  setUserRole: (id, roleId) => request(`/api/users/${id}/role`, { method: 'PATCH', body: { role_id: roleId } }),
   createUser: (body) => request('/api/users', { method: 'POST', body }),
   updateUser: (id, body) => request(`/api/users/${id}`, { method: 'PATCH', body }),
-  // reassignTo: a sales user's id, or null to leave the deleted user's customers unassigned.
+  // reassignTo: the id of a user who can own customers, or null to leave the deleted user's customers unassigned.
   deleteUser: (id, reassignTo) =>
     request(`/api/users/${id}`, { method: 'DELETE', body: { reassign_to: reassignTo } }),
-  listJobTitles: () => request('/api/job-titles'),
-  createJobTitle: (name) => request('/api/job-titles', { method: 'POST', body: { name } }),
-  renameJobTitle: (id, name) => request(`/api/job-titles/${id}`, { method: 'PATCH', body: { name } }),
-  deleteJobTitle: (id) => request(`/api/job-titles/${id}`, { method: 'DELETE' }),
+  listRoles: () => request('/api/roles'),
+  listPermissions: () => request('/api/roles/permissions'),
+  createRole: (body) => request('/api/roles', { method: 'POST', body }),
+  updateRole: (id, body) => request(`/api/roles/${id}`, { method: 'PATCH', body }),
+  deleteRole: (id) => request(`/api/roles/${id}`, { method: 'DELETE' }),
   listArticles: (q) =>
     request(`/api/knowledge${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   createArticle: (body) => request('/api/knowledge', { method: 'POST', body }),

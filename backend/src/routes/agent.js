@@ -9,10 +9,10 @@ const router = Router();
  * /api/agent/chat:
  *   post:
  *     tags: [Agent]
- *     summary: Ask a natural-language question about customer data
+ *     summary: Ask a natural-language question about customer data (agent.use)
  *     description: |
  *       Claude answers using tools that read and write the customer table,
- *       limited to the customers assigned to the logged-in user.
+ *       limited to the customers the logged-in user can see.
  *       Try: "get all customers", "find customer Kannan",
  *       "add customer Sara with email sara@example.com".
  *       Pass the returned conversationId to continue the same conversation.
@@ -45,6 +45,7 @@ const router = Router();
  *                       input: { type: object }
  *       400: { description: message is required }
  *       401: { $ref: '#/components/responses/Unauthorized' }
+ *       403: { $ref: '#/components/responses/Forbidden' }
  *       503: { description: Anthropic API key not configured }
  */
 router.post("/chat", async (req, res, next) => {
@@ -73,6 +74,7 @@ router.post("/chat", async (req, res, next) => {
  *     responses:
  *       204: { description: Conversation cleared }
  *       401: { $ref: '#/components/responses/Unauthorized' }
+ *       403: { $ref: '#/components/responses/Forbidden' }
  */
 router.delete("/chat/:conversationId", (req, res) => {
   resetConversation(req.user.user_id, req.params.conversationId);

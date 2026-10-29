@@ -13,7 +13,11 @@ const initials = (name) =>
 
 export default function CustomersPage({ onChat, initialOwner = '' }) {
   const { t, locale, lang } = useI18n()
-  const isAdmin = useAuth().user.role === 'admin'
+  const { can } = useAuth()
+  const seesAll = can('customers.view_all')
+  const canAssign = can('customers.assign')
+  const canDelete = can('customers.delete')
+  const canExport = can('customers.export')
   const [customers, setCustomers] = useState([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
@@ -21,9 +25,10 @@ export default function CustomersPage({ onChat, initialOwner = '' }) {
   const [editing, setEditing] = useState(null) // null | 'new' | customer
   const [deleting, setDeleting] = useState(null)
   const [toast, setToast] = useState('')
-  // Admin only: owner filter ('' all, 'none' unassigned, or a user id), sales users, bulk selection.
+  // customers.view_all only: owner filter ('' all, 'none' unassigned, or a user id) and possible owners.
+  // customers.assign: bulk selection.
   const [owner, setOwner] = useState(initialOwner)
-  const [salesUsers, setSalesUsers] = useState([])
+  const [owners, setOwners] = useState([])
   const [selected, setSelected] = useState(() => new Set())
   const [assignTo, setAssignTo] = useState('')
   const [exporting, setExporting] = useState(false)
@@ -33,13 +38,13 @@ export default function CustomersPage({ onChat, initialOwner = '' }) {
     setError('')
     setSelected(new Set())
     try {
-      setCustomers(await api.listCustomers(name, isAdmin ? owner : ''))
+      setCustomers(await api.listCustomers(name, seesAll ? owner : ''))
     } catch (err) {
       setError(err.message)
     } finally {
       setLoading(false)
     }
-  }, [isAdmin, owner])
+  }, [seesAll, owner])
 
   useEffect(() => {
     const timer = setTimeout(() => load(search.trim()), 250)
@@ -47,11 +52,11 @@ export default function CustomersPage({ onChat, initialOwner = '' }) {
   }, [search, load])
 
   useEffect(() => {
-    if (!isAdmin) return
-    api.listUsers()
-      .then((users) => setSalesUsers(users.filter((u) => u.role === 'sales')))
+    if (!seesAll) return
+    api.listCustomerOwners()
+      .then(setOwners)
       .catch((err) => setError(err.message))
-  }, [isAdmin])
+  }, [seesAll])
 
   function toggleSelected(id) {
     const next = new Set(selected)
@@ -102,13 +107,13 @@ export default function CustomersPage({ onChat, initialOwner = '' }) {
     }
   }
 
-  // Exports what the table shows: the current search and, for admins, the owner filter.
+  // Exports what the table shows: the current search and, with customers.view_all, the owner filter.
   const exportCustomers = async (format) => {
     setExporting(true)
     setError('')
     try {
       const { blob, filename } = await api.exportCustomers({
-        format, name: search.trim(), salesUserId: isAdmin ? owner : '', lang,
+        format, name: search.trim(), salesUserId: seesAll ? owner : '', lang,
       })
       saveBlob(blob, filename)
     } catch (err) {
@@ -118,7 +123,7 @@ export default function CustomersPage({ onChat, initialOwner = '' }) {
     }
   }
 
-  const columns = isAdmin ? 7 : 5
+  const columns = 5 + (canAssign ? 1 : 0) + (seesAll ? 1 : 0)
 
   return (
     <div className="page">
@@ -128,7 +133,7 @@ export default function CustomersPage({ onChat, initialOwner = '' }) {
           <p className="muted">{t.customersSubtitle}</p>
         </div>
         <div className="header-actions">
-          <button className="btn ghost" onClick={() => onChat()}>{t.chatWithAgent}</button>
+          {onChat && <button className="btn ghost" onClick={() => onChat()}>{t.chatWithAgent}</button>}
           <button className="btn primary" onClick={() => setEditing('new')}>{t.addCustomer}</button>
         </div>
       </header>
@@ -156,36 +161,38 @@ export default function CustomersPage({ onChat, initialOwner = '' }) {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          {isAdmin && (
+          {seesAll && (
             <select className="select" value={owner} onChange={(e) => setOwner(e.target.value)} aria-label={t.colOwner}>
               <option value="">{t.allOwners}</option>
               <option value="none">{t.unassigned}</option>
-              {salesUsers.map((u) => (
+              {owners.map((u) => (
                 <option key={u.user_id} value={u.user_id}>{u.name}</option>
               ))}
             </select>
           )}
           <button className="btn ghost" onClick={() => load(search.trim())}>{t.refresh}</button>
-          <select
-            className="select"
-            value=""
-            disabled={exporting}
-            onChange={(e) => exportCustomers(e.target.value)}
-            aria-label={t.export}
-          >
-            <option value="" disabled>{exporting ? t.exporting : t.export}</option>
-            <option value="xlsx">{t.exportExcel}</option>
-            <option value="pdf">{t.exportPdf}</option>
-          </select>
+          {canExport && (
+            <select
+              className="select"
+              value=""
+              disabled={exporting}
+              onChange={(e) => exportCustomers(e.target.value)}
+              aria-label={t.export}
+            >
+              <option value="" disabled>{exporting ? t.exporting : t.export}</option>
+              <option value="xlsx">{t.exportExcel}</option>
+              <option value="pdf">{t.exportPdf}</option>
+            </select>
+          )}
         </div>
 
-        {isAdmin && selected.size > 0 && (
+        {canAssign && selected.size > 0 && (
           <div className="bulk-bar">
             <span>{t.selectedCount(selected.size)}</span>
             <select className="select" value={assignTo} onChange={(e) => setAssignTo(e.target.value)} aria-label={t.assignTo}>
               <option value="" disabled>{t.assignTo}</option>
               <option value="none">{t.unassigned}</option>
-              {salesUsers.map((u) => (
+              {owners.map((u) => (
                 <option key={u.user_id} value={u.user_id}>{u.name}</option>
               ))}
             </select>
@@ -200,7 +207,7 @@ export default function CustomersPage({ onChat, initialOwner = '' }) {
           <table>
             <thead>
               <tr>
-                {isAdmin && (
+                {canAssign && (
                   <th className="check-col">
                     <input
                       type="checkbox"
@@ -212,7 +219,7 @@ export default function CustomersPage({ onChat, initialOwner = '' }) {
                 )}
                 <th>{t.colId}</th>
                 <th>{t.colCustomer}</th>
-                {isAdmin && <th>{t.colOwner}</th>}
+                {seesAll && <th>{t.colOwner}</th>}
                 <th>{t.colPhone}</th>
                 <th>{t.colCreated}</th>
                 <th className="end">{t.colActions}</th>
@@ -226,7 +233,7 @@ export default function CustomersPage({ onChat, initialOwner = '' }) {
               ) : (
                 customers.map((c) => (
                   <tr key={c.customer_id}>
-                    {isAdmin && (
+                    {canAssign && (
                       <td className="check-col">
                         <input
                           type="checkbox"
@@ -246,15 +253,19 @@ export default function CustomersPage({ onChat, initialOwner = '' }) {
                         </div>
                       </div>
                     </td>
-                    {isAdmin && (
+                    {seesAll && (
                       <td>{c.sales_user_name ?? <span className="tag muted">{t.unassigned}</span>}</td>
                     )}
                     <td>{c.phone ? <bdi>{c.phone}</bdi> : <span className="muted">—</span>}</td>
                     <td className="muted">{formatDate(c.created_at, locale)}</td>
                     <td className="end">
-                      <button className="btn small primary-ghost" onClick={() => onChat(t.askAboutPrompt(c))}>{t.askAi}</button>
+                      {onChat && (
+                        <button className="btn small primary-ghost" onClick={() => onChat(t.askAboutPrompt(c))}>{t.askAi}</button>
+                      )}
                       <button className="btn small ghost" onClick={() => setEditing(c)}>{t.edit}</button>
-                      <button className="btn small danger-ghost" onClick={() => setDeleting(c)}>{t.delete}</button>
+                      {canDelete && (
+                        <button className="btn small danger-ghost" onClick={() => setDeleting(c)}>{t.delete}</button>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -268,7 +279,7 @@ export default function CustomersPage({ onChat, initialOwner = '' }) {
         <Modal title={editing === 'new' ? t.addCustomer.replace('+ ', '') : t.editCustomer} onClose={() => setEditing(null)}>
           <CustomerForm
             initial={editing === 'new' ? null : editing}
-            salesUsers={isAdmin ? salesUsers : null}
+            salesUsers={seesAll ? owners : null}
             onSubmit={handleSave}
             onCancel={() => setEditing(null)}
           />

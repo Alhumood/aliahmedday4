@@ -1,33 +1,63 @@
 import pg from "pg";
+import { SYSTEM_ROLES, can } from "./permissions.js";
 
 export const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
 });
 
-// The user, job title and customer owner schema is created on first use, like the knowledge table.
+// The user, role and customer owner schema is created on first use, like the knowledge table.
+// The first run also creates the built-in roles and migrates the old sales/admin roles and job titles
+// (spec 03, section 11.4). The old app_user.role/job_title_id columns and job_title table are left
+// unused so an older deployment on the same database keeps working.
+const sqlArray = (keys) => `ARRAY[${keys.map((k) => `'${k}'`).join(", ")}]::text[]`;
+
 let authReady;
 function ensureAuthSchema() {
+  const { admin, sales } = SYSTEM_ROLES;
   authReady ??= pool
     .query(
-      `CREATE TABLE IF NOT EXISTS app_user (
+      `CREATE TABLE IF NOT EXISTS role (
+         role_id SERIAL PRIMARY KEY,
+         name TEXT NOT NULL,
+         permissions TEXT[] NOT NULL DEFAULT '{}',
+         system_key TEXT UNIQUE,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+       );
+       CREATE UNIQUE INDEX IF NOT EXISTS role_name_lower_idx ON role (lower(name));
+       CREATE TABLE IF NOT EXISTS app_user (
          user_id SERIAL PRIMARY KEY,
          name TEXT NOT NULL,
          email TEXT NOT NULL UNIQUE,
          password_hash TEXT NOT NULL,
-         role TEXT NOT NULL DEFAULT 'sales',
          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
        );
+       ALTER TABLE app_user ADD COLUMN IF NOT EXISTS role_id INTEGER REFERENCES role(role_id);
        ALTER TABLE customer ADD COLUMN IF NOT EXISTS sales_user_id INTEGER REFERENCES app_user(user_id);
        CREATE INDEX IF NOT EXISTS customer_sales_user_id_idx ON customer (sales_user_id);
-       CREATE TABLE IF NOT EXISTS job_title (
-         job_title_id SERIAL PRIMARY KEY,
-         name TEXT NOT NULL,
-         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-       );
-       CREATE UNIQUE INDEX IF NOT EXISTS job_title_name_lower_idx ON job_title (lower(name));
-       ALTER TABLE app_user ADD COLUMN IF NOT EXISTS job_title_id INTEGER
-         REFERENCES job_title(job_title_id) ON DELETE SET NULL;`,
+       DO $$
+       DECLARE
+         has_old_role BOOLEAN := EXISTS (
+           SELECT 1 FROM information_schema.columns WHERE table_name = 'app_user' AND column_name = 'role');
+       BEGIN
+         IF NOT EXISTS (SELECT 1 FROM role WHERE system_key = 'admin') THEN
+           INSERT INTO role (name, permissions, system_key) VALUES
+             ('${admin.name}', ${sqlArray(admin.permissions)}, 'admin'),
+             ('${sales.name}', ${sqlArray(sales.permissions)}, 'sales');
+           IF has_old_role AND to_regclass('job_title') IS NOT NULL THEN
+             INSERT INTO role (name, permissions)
+               SELECT name, ${sqlArray(sales.permissions)} FROM job_title ON CONFLICT DO NOTHING;
+             EXECUTE 'UPDATE app_user u SET role_id = r.role_id
+                      FROM job_title jt JOIN role r ON lower(r.name) = lower(jt.name) AND r.system_key IS NULL
+                      WHERE u.job_title_id = jt.job_title_id AND u.role = ''sales'' AND u.role_id IS NULL';
+           END IF;
+         END IF;
+         IF has_old_role THEN
+           EXECUTE 'UPDATE app_user u SET role_id = r.role_id FROM role r
+                    WHERE u.role_id IS NULL AND r.system_key = u.role';
+         END IF;
+         UPDATE app_user SET role_id = (SELECT role_id FROM role WHERE system_key = 'sales') WHERE role_id IS NULL;
+       END $$;`,
     )
     .catch((err) => {
       authReady = undefined;
@@ -52,17 +82,20 @@ async function withConflict(message, fn) {
 
 const EMAIL_TAKEN = "Email is already registered";
 
-// Every user read includes the job title, so all user responses have the same shape.
+// Every user read includes the role and its permissions, so all user responses have the same shape.
 const userSelect = (extra = "") => `
-  SELECT u.user_id, u.name, u.email, u.role, u.job_title_id, jt.name AS job_title, u.created_at${extra}
-  FROM app_user u LEFT JOIN job_title jt ON jt.job_title_id = u.job_title_id`;
+  SELECT u.user_id, u.name, u.email, u.role_id, r.name AS role, r.system_key AS role_key, r.permissions,
+         u.created_at${extra}
+  FROM app_user u JOIN role r ON r.role_id = u.role_id`;
 
-export async function createUser({ name, email, passwordHash, role = "sales", jobTitleId = null }) {
+// roleId defaults to the built-in Sales role (self-registration never passes one).
+export async function createUser({ name, email, passwordHash, roleId = null }) {
   await ensureAuthSchema();
   const { rows } = await withConflict(EMAIL_TAKEN, () =>
     pool.query(
-      `INSERT INTO app_user (name, email, password_hash, role, job_title_id) VALUES ($1, $2, $3, $4, $5) RETURNING user_id`,
-      [name, email, passwordHash, role, jobTitleId],
+      `INSERT INTO app_user (name, email, password_hash, role_id)
+       VALUES ($1, $2, $3, COALESCE($4, (SELECT role_id FROM role WHERE system_key = 'sales'))) RETURNING user_id`,
+      [name, email, passwordHash, roleId],
     ),
   );
   return getUserById(rows[0].user_id);
@@ -95,14 +128,14 @@ export async function getUserWithCount(id) {
   return rows[0] ?? null;
 }
 
-export async function setUserRole(id, role) {
-  return updateUser(id, { role });
+export async function setUserRole(id, roleId) {
+  return updateUser(id, { roleId });
 }
 
-// Changes only the fields present in `fields`; jobTitleId: null clears the job title.
+// Changes only the fields present in `fields`.
 export async function updateUser(id, fields) {
   await ensureAuthSchema();
-  const columns = { name: "name", email: "email", passwordHash: "password_hash", role: "role", jobTitleId: "job_title_id" };
+  const columns = { name: "name", email: "email", passwordHash: "password_hash", roleId: "role_id" };
   const params = [id];
   const sets = [];
   for (const [key, column] of Object.entries(columns)) {
@@ -129,7 +162,8 @@ export async function deleteUser(id, reassignTo = null) {
     await client.query("BEGIN");
     const moved = await client.query("UPDATE customer SET sales_user_id = $2 WHERE sales_user_id = $1", [id, reassignTo]);
     const { rows } = await client.query(
-      "DELETE FROM app_user WHERE user_id = $1 RETURNING user_id, name, email, role",
+      `DELETE FROM app_user u WHERE u.user_id = $1
+       RETURNING u.user_id, u.name, u.email, (SELECT name FROM role WHERE role_id = u.role_id) AS role`,
       [id],
     );
     if (rows.length === 0) {
@@ -152,76 +186,104 @@ export async function countCustomersOwnedBy(userId) {
   return rows[0].n;
 }
 
-// Only sales users can own customers.
-export async function isSalesUser(id) {
+// Only users whose role has customers.own can own customers.
+export async function canOwnCustomers(id) {
   await ensureAuthSchema();
-  const { rows } = await pool.query("SELECT 1 FROM app_user WHERE user_id = $1 AND role = 'sales'", [id]);
+  const { rows } = await pool.query(
+    `SELECT 1 FROM app_user u JOIN role r ON r.role_id = u.role_id
+     WHERE u.user_id = $1 AND 'customers.own' = ANY(r.permissions)`,
+    [id],
+  );
   return rows.length > 0;
 }
 
-// Job titles are descriptive labels only; access is decided by role.
-const JOB_TITLE_TAKEN = "A job title with this name already exists";
-const JOB_TITLE_SELECT = `
-  SELECT jt.job_title_id, jt.name, jt.created_at,
-         (SELECT count(*)::int FROM app_user u WHERE u.job_title_id = jt.job_title_id) AS user_count
-  FROM job_title jt`;
-
-export async function listJobTitles() {
+// Users who can own customers, for owner pickers and filters.
+export async function listCustomerOwners() {
   await ensureAuthSchema();
-  const { rows } = await pool.query(`${JOB_TITLE_SELECT} ORDER BY lower(jt.name)`);
+  const { rows } = await pool.query(
+    `SELECT u.user_id, u.name FROM app_user u JOIN role r ON r.role_id = u.role_id
+     WHERE 'customers.own' = ANY(r.permissions) ORDER BY lower(u.name)`,
+  );
   return rows;
 }
 
-async function getJobTitle(id) {
-  const { rows } = await pool.query(`${JOB_TITLE_SELECT} WHERE jt.job_title_id = $1`, [id]);
+// Roles carry the permissions; system_key marks the built-in Admin and Sales roles.
+const ROLE_TAKEN = "A role with this name already exists";
+const ROLE_SELECT = `
+  SELECT r.role_id, r.name, r.permissions, r.system_key, r.created_at,
+         (SELECT count(*)::int FROM app_user u WHERE u.role_id = r.role_id) AS user_count
+  FROM role r`;
+
+export async function listRoles() {
+  await ensureAuthSchema();
+  const { rows } = await pool.query(`${ROLE_SELECT} ORDER BY r.system_key IS NULL, r.system_key, lower(r.name)`);
+  return rows;
+}
+
+export async function getRole(id) {
+  await ensureAuthSchema();
+  const { rows } = await pool.query(`${ROLE_SELECT} WHERE r.role_id = $1`, [id]);
   return rows[0] ?? null;
 }
 
-export async function jobTitleExists(id) {
+export async function getSystemRole(key) {
   await ensureAuthSchema();
-  const { rows } = await pool.query("SELECT 1 FROM job_title WHERE job_title_id = $1", [id]);
-  return rows.length > 0;
+  const { rows } = await pool.query(`${ROLE_SELECT} WHERE r.system_key = $1`, [key]);
+  return rows[0] ?? null;
 }
 
-export async function createJobTitle(name) {
+export async function createRole({ name, permissions }) {
   await ensureAuthSchema();
-  const { rows } = await withConflict(JOB_TITLE_TAKEN, () =>
-    pool.query("INSERT INTO job_title (name) VALUES ($1) RETURNING job_title_id", [name]),
+  const { rows } = await withConflict(ROLE_TAKEN, () =>
+    pool.query("INSERT INTO role (name, permissions) VALUES ($1, $2) RETURNING role_id", [name, permissions]),
   );
-  return getJobTitle(rows[0].job_title_id);
+  return getRole(rows[0].role_id);
 }
 
-export async function renameJobTitle(id, name) {
+// Changes only the fields present (name, permissions).
+export async function updateRole(id, { name, permissions }) {
   await ensureAuthSchema();
-  const { rowCount } = await withConflict(JOB_TITLE_TAKEN, () =>
-    pool.query("UPDATE job_title SET name = $2 WHERE job_title_id = $1", [id, name]),
+  const { rowCount } = await withConflict(ROLE_TAKEN, () =>
+    pool.query(
+      "UPDATE role SET name = COALESCE($2, name), permissions = COALESCE($3, permissions) WHERE role_id = $1",
+      [id, name ?? null, permissions ?? null],
+    ),
   );
-  return rowCount === 0 ? null : getJobTitle(id);
+  return rowCount === 0 ? null : getRole(id);
 }
 
-// Users with this title are left without one (ON DELETE SET NULL).
-export async function deleteJobTitle(id) {
+// The caller makes sure no users have the role; the foreign key would refuse it anyway.
+export async function deleteRole(id) {
   await ensureAuthSchema();
-  const title = await getJobTitle(id);
-  if (!title) return null;
-  await pool.query("DELETE FROM job_title WHERE job_title_id = $1", [id]);
-  return title;
+  const role = await getRole(id);
+  if (!role) return null;
+  await pool.query("DELETE FROM role WHERE role_id = $1", [id]);
+  return role;
 }
 
-// Customer access depends on the caller's role. Sales users are always limited to their own rows;
-// admins reach every row, may filter by owner, and also get the owner's name.
-const isAdmin = (user) => user.role === "admin";
+export async function countCustomersOwnedByRole(roleId) {
+  await ensureAuthSchema();
+  const { rows } = await pool.query(
+    "SELECT count(*)::int AS n FROM customer c JOIN app_user u ON u.user_id = c.sales_user_id WHERE u.role_id = $1",
+    [roleId],
+  );
+  return rows[0].n;
+}
+
+// Customer access depends on the caller's permissions. Without customers.view_all a user is always
+// limited to their own rows; with it they reach every row, may filter by owner, and get the owner's name.
+const seesAll = (user) => can(user, "customers.view_all");
 
 function customerSelect(user, source) {
-  const ownerName = isAdmin(user) ? ", u.name AS sales_user_name" : "";
+  const ownerName = seesAll(user) ? ", u.name AS sales_user_name" : "";
   return `SELECT c.customer_id, c.name, c.email, c.phone, c.sales_user_id, c.created_at${ownerName}
           FROM ${source} c LEFT JOIN app_user u ON u.user_id = c.sales_user_id`;
 }
 
 // Returns the SQL condition limiting which customers `user` can reach, pushing its values onto params.
-// salesUserId is an admin-only filter: an id, "none" for unassigned, or undefined for all.
+// salesUserId is a view_all-only filter: an id, "none" for unassigned, or undefined for all.
 function ownerScope(user, params, salesUserId) {
-  if (!isAdmin(user)) {
+  if (!seesAll(user)) {
     params.push(user.user_id);
     return `c.sales_user_id = $${params.length}`;
   }
@@ -258,10 +320,10 @@ export async function getCustomerById(user, id) {
   return rows[0] ?? null;
 }
 
-// salesUserId is only honoured for admins (null = unassigned); sales users always own what they create.
+// salesUserId is only honoured with customers.view_all (null = unassigned); others always own what they create.
 export async function createCustomer(user, { name, email = null, phone = null, salesUserId = null }) {
   await ensureAuthSchema();
-  const owner = isAdmin(user) ? salesUserId : user.user_id;
+  const owner = seesAll(user) ? salesUserId : user.user_id;
   const { rows } = await pool.query(
     `WITH changed AS (
        INSERT INTO customer (name, email, phone, sales_user_id) VALUES ($1, $2, $3, $4) RETURNING *
@@ -271,12 +333,12 @@ export async function createCustomer(user, { name, email = null, phone = null, s
   return rows[0];
 }
 
-// salesUserId: undefined leaves the owner unchanged, null unassigns; only honoured for admins.
+// salesUserId: undefined leaves the owner unchanged, null unassigns; only honoured with customers.view_all.
 export async function updateCustomer(user, id, { name, email, phone, salesUserId }) {
   await ensureAuthSchema();
   const params = [id, name ?? null, email ?? null, phone ?? null];
   const sets = ["name = COALESCE($2, name)", "email = COALESCE($3, email)", "phone = COALESCE($4, phone)"];
-  if (isAdmin(user) && salesUserId !== undefined) {
+  if (seesAll(user) && salesUserId !== undefined) {
     params.push(salesUserId);
     sets.push(`sales_user_id = $${params.length}`);
   }
@@ -303,7 +365,7 @@ export async function deleteCustomer(user, id) {
   return rows[0] ?? null;
 }
 
-// Admin-only bulk (re)assignment; all-or-nothing, so one unknown id changes nothing.
+// Bulk (re)assignment (customers.assign); all-or-nothing, so one unknown id changes nothing.
 export async function assignCustomers(user, customerIds, salesUserId) {
   await ensureAuthSchema();
   const client = await pool.connect();
