@@ -21,6 +21,7 @@ npm run dev
 - Health: `GET /api/health`
 - Auth: `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me`
 - CRUD (needs a token): `GET/POST /api/customers`, `GET/PUT/DELETE /api/customers/{id}`, `GET /api/customers?name=kan`
+- Export (needs a token): `GET /api/customers/export?format=xlsx|pdf` downloads the customer list as Excel or PDF. It takes the same `name` and (admin only) `sales_user_id` filters as the list, plus `lang=en|ar` for the headers and right-to-left layout. Sales users only get their own customers, and only admins get the Owner column. The Customers page has an **Export** menu that exports what the table shows. The PDF fonts (Noto Sans and Noto Naskh Arabic, SIL Open Font License) are in `backend/src/fonts/`.
 - Agent (needs a token): `POST /api/agent/chat` with `{ "message": "get all customers" }`.
   Send the returned `conversationId` back to continue the conversation.
 

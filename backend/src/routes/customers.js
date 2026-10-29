@@ -1,6 +1,7 @@
 import { Router } from "express";
 import * as db from "../db.js";
 import { requireAdmin } from "../auth.js";
+import { CONTENT_TYPES, LABELS as EXPORT_LABELS, buildCustomersPdf, buildCustomersXlsx, fileName } from "../export.js";
 
 const router = Router();
 
@@ -15,6 +16,20 @@ function parseId(req, res) {
 
 const isAdmin = (req) => req.user.role === "admin";
 const OWNER_ERROR = "sales_user_id must be a sales user";
+
+// Filters shared by the list and the export. sales_user_id is admin only (ignored for sales users):
+// a user id or "none" for unassigned. Throws a 400 error when it is invalid.
+function listFilters(req) {
+  const { name, sales_user_id: owner } = req.query;
+  let salesUserId;
+  if (isAdmin(req) && owner !== undefined) {
+    salesUserId = owner === "none" ? "none" : Number(owner);
+    if (salesUserId !== "none" && !(Number.isInteger(salesUserId) && salesUserId > 0)) {
+      throw Object.assign(new Error("sales_user_id must be a user id or 'none'"), { status: 400 });
+    }
+  }
+  return { name: name ? String(name) : undefined, salesUserId };
+}
 
 // Admin-only owner from the request body. Returns undefined when absent (or for sales users,
 // whose value is ignored), null to unassign, the id when valid, or false after sending a 400.
@@ -56,15 +71,79 @@ async function readOwner(req, res) {
  */
 router.get("/", async (req, res, next) => {
   try {
-    const { name, sales_user_id: owner } = req.query;
-    let salesUserId;
-    if (isAdmin(req) && owner !== undefined) {
-      salesUserId = owner === "none" ? "none" : Number(owner);
-      if (salesUserId !== "none" && !(Number.isInteger(salesUserId) && salesUserId > 0)) {
-        return res.status(400).json({ error: "sales_user_id must be a user id or 'none'" });
-      }
+    res.json(await db.listCustomers(req.user, listFilters(req)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * @openapi
+ * /api/customers/export:
+ *   get:
+ *     tags: [Customers]
+ *     summary: Download the customer list as Excel or PDF
+ *     description: >
+ *       Exports the same rows as `GET /api/customers` with the same filters, so sales users only get their own
+ *       customers. The Owner column is included for admins only.
+ *     parameters:
+ *       - in: query
+ *         name: format
+ *         required: true
+ *         schema: { type: string, enum: [xlsx, pdf] }
+ *       - in: query
+ *         name: name
+ *         schema: { type: string }
+ *         description: Case-insensitive partial match on customer name
+ *       - in: query
+ *         name: sales_user_id
+ *         schema: { type: string, example: "none" }
+ *         description: Admin only, ignored for sales users. A sales user's id, or `none` for unassigned customers.
+ *       - in: query
+ *         name: lang
+ *         schema: { type: string, enum: [en, ar], default: en }
+ *         description: Language of the headers. `ar` also makes the file right-to-left.
+ *     responses:
+ *       200:
+ *         description: The file
+ *         headers:
+ *           Content-Disposition:
+ *             schema: { type: string, example: 'attachment; filename="customers-2026-10-29.xlsx"' }
+ *         content:
+ *           application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+ *             schema: { type: string, format: binary }
+ *           application/pdf:
+ *             schema: { type: string, format: binary }
+ *       400: { description: Missing or unknown format, or invalid sales_user_id filter }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
+ */
+router.get("/export", async (req, res, next) => {
+  try {
+    const { format } = req.query;
+    if (typeof format !== "string" || !Object.hasOwn(CONTENT_TYPES, format)) {
+      return res.status(400).json({ error: "format must be 'xlsx' or 'pdf'" });
     }
-    res.json(await db.listCustomers(req.user, { name: name ? String(name) : undefined, salesUserId }));
+    const filters = listFilters(req);
+    const lang = req.query.lang === "ar" ? "ar" : "en";
+    const rows = await db.listCustomers(req.user, filters);
+    const exportedBy = (await db.getUserById(req.user.user_id))?.name ?? req.user.email;
+
+    // The owner filter shown in the PDF header (admins only).
+    let ownerLabel;
+    if (isAdmin(req)) {
+      const { salesUserId } = filters;
+      if (salesUserId === "none") ownerLabel = EXPORT_LABELS[lang].unassigned;
+      else if (salesUserId === undefined) ownerLabel = EXPORT_LABELS[lang].all;
+      else ownerLabel = (await db.getUserById(salesUserId))?.name ?? `#${salesUserId}`;
+    }
+
+    const build = format === "xlsx" ? buildCustomersXlsx : buildCustomersPdf;
+    const file = await build(rows, { user: req.user, lang, exportedBy, filters: { name: filters.name, ownerLabel } });
+    res.set({
+      "Content-Type": CONTENT_TYPES[format],
+      "Content-Disposition": `attachment; filename="${fileName(format)}"`,
+    });
+    res.send(file);
   } catch (err) {
     next(err);
   }

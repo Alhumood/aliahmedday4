@@ -13,7 +13,8 @@ import knowledgeRoutes from "./routes/knowledge.js";
 
 const app = express();
 
-app.use(cors({ origin: process.env.FRONTEND_ORIGIN?.split(",") ?? "*" }));
+// Content-Disposition is exposed so the frontend can read the export file name across origins.
+app.use(cors({ origin: process.env.FRONTEND_ORIGIN?.split(",") ?? "*", exposedHeaders: ["Content-Disposition"] }));
 app.use(express.json());
 
 // Swagger UI assets come from a CDN so the page also works on Vercel,

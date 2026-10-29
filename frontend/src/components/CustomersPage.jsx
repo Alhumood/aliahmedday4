@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api } from '../api.js'
+import { api, saveBlob } from '../api.js'
 import { useI18n } from '../i18n.jsx'
 import { useAuth } from '../auth.jsx'
 import Modal from './Modal.jsx'
@@ -12,7 +12,7 @@ const initials = (name) =>
   name.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join('')
 
 export default function CustomersPage({ onChat, initialOwner = '' }) {
-  const { t, locale } = useI18n()
+  const { t, locale, lang } = useI18n()
   const isAdmin = useAuth().user.role === 'admin'
   const [customers, setCustomers] = useState([])
   const [search, setSearch] = useState('')
@@ -26,6 +26,7 @@ export default function CustomersPage({ onChat, initialOwner = '' }) {
   const [salesUsers, setSalesUsers] = useState([])
   const [selected, setSelected] = useState(() => new Set())
   const [assignTo, setAssignTo] = useState('')
+  const [exporting, setExporting] = useState(false)
 
   const load = useCallback(async (name) => {
     setLoading(true)
@@ -101,6 +102,22 @@ export default function CustomersPage({ onChat, initialOwner = '' }) {
     }
   }
 
+  // Exports what the table shows: the current search and, for admins, the owner filter.
+  const exportCustomers = async (format) => {
+    setExporting(true)
+    setError('')
+    try {
+      const { blob, filename } = await api.exportCustomers({
+        format, name: search.trim(), salesUserId: isAdmin ? owner : '', lang,
+      })
+      saveBlob(blob, filename)
+    } catch (err) {
+      setError(t.exportFailed(err.message))
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const columns = isAdmin ? 7 : 5
 
   return (
@@ -149,6 +166,17 @@ export default function CustomersPage({ onChat, initialOwner = '' }) {
             </select>
           )}
           <button className="btn ghost" onClick={() => load(search.trim())}>{t.refresh}</button>
+          <select
+            className="select"
+            value=""
+            disabled={exporting}
+            onChange={(e) => exportCustomers(e.target.value)}
+            aria-label={t.export}
+          >
+            <option value="" disabled>{exporting ? t.exporting : t.export}</option>
+            <option value="xlsx">{t.exportExcel}</option>
+            <option value="pdf">{t.exportPdf}</option>
+          </select>
         </div>
 
         {isAdmin && selected.size > 0 && (

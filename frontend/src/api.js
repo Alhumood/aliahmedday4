@@ -28,6 +28,32 @@ async function request(path, options = {}) {
   return data
 }
 
+// For file responses: returns { blob, filename }, with the name from Content-Disposition.
+async function download(path, fallbackName) {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+  })
+  if (res.status === 401 && authToken) unauthorizedHandler?.()
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.error || `Request failed (${res.status})`)
+  }
+  const match = /filename="?([^";]+)"?/.exec(res.headers.get('Content-Disposition') || '')
+  return { blob: await res.blob(), filename: match ? match[1] : fallbackName }
+}
+
+// Starts a browser download of a blob.
+export function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
 export const api = {
   baseUrl: BASE_URL,
   health: () => request('/api/health'),
@@ -41,6 +67,13 @@ export const api = {
     if (salesUserId) params.set('sales_user_id', salesUserId)
     const query = params.toString()
     return request(`/api/customers${query ? `?${query}` : ''}`)
+  },
+  // format: 'xlsx' | 'pdf'. Same filters as listCustomers; lang sets the file's language.
+  exportCustomers: ({ format, name, salesUserId, lang }) => {
+    const params = new URLSearchParams({ format, lang })
+    if (name) params.set('name', name)
+    if (salesUserId) params.set('sales_user_id', salesUserId)
+    return download(`/api/customers/export?${params}`, `customers.${format}`)
   },
   createCustomer: (body) => request('/api/customers', { method: 'POST', body }),
   updateCustomer: (id, body) => request(`/api/customers/${id}`, { method: 'PUT', body }),
