@@ -52,3 +52,81 @@ export async function deleteCustomer(id) {
   );
   return rows[0] ?? null;
 }
+
+const KNOWLEDGE_COLUMNS = "article_id, title, category, content, created_at, updated_at";
+
+// The knowledge table is created on first use, so no separate migration step is needed.
+let knowledgeReady;
+function ensureKnowledgeTable() {
+  knowledgeReady ??= pool
+    .query(
+      `CREATE TABLE IF NOT EXISTS knowledge_article (
+         article_id SERIAL PRIMARY KEY,
+         title TEXT NOT NULL,
+         category TEXT,
+         content TEXT NOT NULL,
+         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+       )`,
+    )
+    .catch((err) => {
+      knowledgeReady = undefined;
+      throw err;
+    });
+  return knowledgeReady;
+}
+
+export async function listArticles() {
+  await ensureKnowledgeTable();
+  const { rows } = await pool.query(`SELECT ${KNOWLEDGE_COLUMNS} FROM knowledge_article ORDER BY updated_at DESC`);
+  return rows;
+}
+
+export async function searchArticles(query) {
+  await ensureKnowledgeTable();
+  const { rows } = await pool.query(
+    `SELECT ${KNOWLEDGE_COLUMNS} FROM knowledge_article
+     WHERE title ILIKE $1 OR content ILIKE $1 OR category ILIKE $1
+     ORDER BY updated_at DESC`,
+    [`%${query}%`],
+  );
+  return rows;
+}
+
+export async function getArticleById(id) {
+  await ensureKnowledgeTable();
+  const { rows } = await pool.query(`SELECT ${KNOWLEDGE_COLUMNS} FROM knowledge_article WHERE article_id = $1`, [id]);
+  return rows[0] ?? null;
+}
+
+export async function createArticle({ title, category = null, content }) {
+  await ensureKnowledgeTable();
+  const { rows } = await pool.query(
+    `INSERT INTO knowledge_article (title, category, content) VALUES ($1, $2, $3) RETURNING ${KNOWLEDGE_COLUMNS}`,
+    [title, category, content],
+  );
+  return rows[0];
+}
+
+export async function updateArticle(id, { title, category, content }) {
+  await ensureKnowledgeTable();
+  const { rows } = await pool.query(
+    `UPDATE knowledge_article SET
+       title = COALESCE($2, title),
+       category = COALESCE($3, category),
+       content = COALESCE($4, content),
+       updated_at = now()
+     WHERE article_id = $1 RETURNING ${KNOWLEDGE_COLUMNS}`,
+    [id, title ?? null, category ?? null, content ?? null],
+  );
+  return rows[0] ?? null;
+}
+
+export async function deleteArticle(id) {
+  await ensureKnowledgeTable();
+  const { rows } = await pool.query(
+    `DELETE FROM knowledge_article WHERE article_id = $1 RETURNING ${KNOWLEDGE_COLUMNS}`,
+    [id],
+  );
+  return rows[0] ?? null;
+}

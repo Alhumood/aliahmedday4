@@ -3,15 +3,20 @@ import { api } from './api.js'
 import { useI18n } from './i18n.jsx'
 import CustomersPage from './components/CustomersPage.jsx'
 import ChatPage from './components/ChatPage.jsx'
+import DashboardPage from './components/DashboardPage.jsx'
+import KnowledgePage from './components/KnowledgePage.jsx'
 
 const NAV = [
+  { id: 'dashboard', labelKey: 'navDashboard', icon: '📊' },
   { id: 'customers', labelKey: 'navCustomers', icon: '👥' },
+  { id: 'knowledge', labelKey: 'navKnowledge', icon: '📚' },
   { id: 'chat', labelKey: 'navChat', icon: '✨' },
 ]
 
 export default function App() {
   const { t, toggle } = useI18n()
-  const [page, setPage] = useState('customers')
+  const [page, setPage] = useState('dashboard')
+  const [chatPrompt, setChatPrompt] = useState(null)
   const [health, setHealth] = useState(null)
 
   useEffect(() => {
@@ -19,6 +24,11 @@ export default function App() {
   }, [])
 
   const online = health?.status === 'ok'
+
+  function openChat(prompt = null) {
+    setChatPrompt(prompt)
+    setPage('chat')
+  }
 
   return (
     <div className="layout">
@@ -32,7 +42,10 @@ export default function App() {
             <button
               key={item.id}
               className={`nav-item ${page === item.id ? 'active' : ''}`}
-              onClick={() => setPage(item.id)}
+              onClick={() => {
+                setChatPrompt(null)
+                setPage(item.id)
+              }}
             >
               <span className="nav-icon">{item.icon}</span>
               {t[item.labelKey]}
@@ -52,7 +65,10 @@ export default function App() {
         </div>
       </aside>
       <main className="content">
-        {page === 'customers' ? <CustomersPage /> : <ChatPage />}
+        {page === 'dashboard' && <DashboardPage onNavigate={setPage} onChat={openChat} />}
+        {page === 'customers' && <CustomersPage onChat={openChat} />}
+        {page === 'knowledge' && <KnowledgePage onChat={openChat} />}
+        {page === 'chat' && <ChatPage initialPrompt={chatPrompt} />}
       </main>
     </div>
   )

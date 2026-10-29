@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm'
 import { api } from '../api.js'
 import { useI18n } from '../i18n.jsx'
 
-export default function ChatPage() {
+export default function ChatPage({ initialPrompt }) {
   const { t } = useI18n()
   // The welcome message (index 0) is rendered from the current language, so
   // it switches along with the rest of the UI.
@@ -13,10 +13,19 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false)
   const [conversationId, setConversationId] = useState(null)
   const endRef = useRef(null)
+  const promptSent = useRef(false)
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, sending])
+
+  // Opened from the customers page with a question already filled in.
+  useEffect(() => {
+    if (initialPrompt && !promptSent.current) {
+      promptSent.current = true
+      send(initialPrompt)
+    }
+  }, [initialPrompt]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function send(text) {
     const message = text.trim()

@@ -9,6 +9,7 @@ const SYSTEM_PROMPT = `You are a customer-data assistant for an internal CRM.
 Answer questions about customers using the provided tools; never invent customer records.
 When the user asks to add or change a customer, call the matching tool, then confirm what was saved.
 If a name search returns several matches, list them and ask which one the user means before updating.
+For questions about policies, procedures, products or how-tos, search the knowledge bank first and answer from the articles you find, citing the article title. If nothing relevant is found, say so instead of guessing.
 Reply in the same language the user writes in (for example Arabic or English).
 Keep answers short. Present lists of customers as a Markdown table with id, name, email and phone, with column headers in the reply language.`;
 
@@ -67,6 +68,21 @@ const tools = [
       additionalProperties: false,
     },
   },
+  {
+    name: "search_knowledge",
+    description: "Search the knowledge bank (policies, procedures, FAQs, product info) by keyword. Matches title, category and content. Use short keywords, not full sentences.",
+    input_schema: {
+      type: "object",
+      properties: { query: { type: "string", description: "Keyword or short phrase" } },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "list_knowledge_articles",
+    description: "Return every article in the knowledge bank. Use when a keyword search finds nothing or the user asks what articles exist.",
+    input_schema: { type: "object", properties: {}, additionalProperties: false },
+  },
 ];
 
 async function executeTool(name, input) {
@@ -85,6 +101,11 @@ async function executeTool(name, input) {
     case "update_customer":
       if (!Number.isInteger(input.customer_id)) throw new Error("customer_id must be an integer");
       return (await db.updateCustomer(input.customer_id, input)) ?? { error: "Customer not found" };
+    case "search_knowledge":
+      if (typeof input.query !== "string" || !input.query.trim()) throw new Error("query is required");
+      return db.searchArticles(input.query.trim());
+    case "list_knowledge_articles":
+      return db.listArticles();
     default:
       throw new Error(`Unknown tool: ${name}`);
   }

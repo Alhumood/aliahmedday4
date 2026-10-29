@@ -20,6 +20,11 @@ export const api = {
   createCustomer: (body) => request('/api/customers', { method: 'POST', body }),
   updateCustomer: (id, body) => request(`/api/customers/${id}`, { method: 'PUT', body }),
   deleteCustomer: (id) => request(`/api/customers/${id}`, { method: 'DELETE' }),
+  listArticles: (q) =>
+    request(`/api/knowledge${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  createArticle: (body) => request('/api/knowledge', { method: 'POST', body }),
+  updateArticle: (id, body) => request(`/api/knowledge/${id}`, { method: 'PUT', body }),
+  deleteArticle: (id) => request(`/api/knowledge/${id}`, { method: 'DELETE' }),
   chat: (message, conversationId) =>
     request('/api/agent/chat', { method: 'POST', body: { message, conversationId } }),
   resetChat: (conversationId) =>

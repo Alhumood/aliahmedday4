@@ -10,7 +10,7 @@ const formatDate = (value, locale) =>
 const initials = (name) =>
   name.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join('')
 
-export default function CustomersPage() {
+export default function CustomersPage({ onChat }) {
   const { t, locale } = useI18n()
   const [customers, setCustomers] = useState([])
   const [search, setSearch] = useState('')
@@ -73,7 +73,10 @@ export default function CustomersPage() {
           <h1>{t.customersTitle}</h1>
           <p className="muted">{t.customersSubtitle}</p>
         </div>
-        <button className="btn primary" onClick={() => setEditing('new')}>{t.addCustomer}</button>
+        <div className="header-actions">
+          <button className="btn ghost" onClick={() => onChat()}>{t.chatWithAgent}</button>
+          <button className="btn primary" onClick={() => setEditing('new')}>{t.addCustomer}</button>
+        </div>
       </header>
 
       <div className="stats">
@@ -136,6 +139,7 @@ export default function CustomersPage() {
                     <td>{c.phone ? <bdi>{c.phone}</bdi> : <span className="muted">—</span>}</td>
                     <td className="muted">{formatDate(c.created_at, locale)}</td>
                     <td className="end">
+                      <button className="btn small primary-ghost" onClick={() => onChat(t.askAboutPrompt(c))}>{t.askAi}</button>
                       <button className="btn small ghost" onClick={() => setEditing(c)}>{t.edit}</button>
                       <button className="btn small danger-ghost" onClick={() => setDeleting(c)}>{t.delete}</button>
                     </td>

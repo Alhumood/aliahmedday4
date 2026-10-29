@@ -5,6 +5,7 @@ import { swaggerSpec } from "./swagger.js";
 import { pool } from "./db.js";
 import customerRoutes from "./routes/customers.js";
 import agentRoutes from "./routes/agent.js";
+import knowledgeRoutes from "./routes/knowledge.js";
 
 const app = express();
 
@@ -51,6 +52,7 @@ app.get("/api/health", async (_req, res) => {
 });
 
 app.use("/api/customers", customerRoutes);
+app.use("/api/knowledge", knowledgeRoutes);
 app.use("/api/agent", agentRoutes);
 
 app.use((err, _req, res, _next) => {
